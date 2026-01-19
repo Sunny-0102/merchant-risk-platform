@@ -1,0 +1,30 @@
+services:
+  ingestion-api:
+    build:
+      context: ../../
+      dockerfile: services/ingestion_api/Dockerfile
+    container_name: ingestion-api
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql://app:app@postgres:5432/appdb
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+    volumes:
+      - ../../:/workspace:cached
+
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: appdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
