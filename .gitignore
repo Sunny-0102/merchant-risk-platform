@@ -7,3 +7,13 @@
 node_modules/
 dist/
 build/
+
+
+.DS_Store
+.venv/
+__pycache__/
+*.pyc
+
+
+infra/local/.env
+infra/local/**/logs/
