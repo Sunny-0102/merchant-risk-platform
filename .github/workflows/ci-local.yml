@@ -1,0 +1,32 @@
+name: MRP Local CI Suite
+
+on:
+  pull_request:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  mrp-ci-local:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v3
+
+      - name: Start local stack (infra/local)
+        working-directory: infra/local
+        run: |
+          docker compose --project-directory "$(pwd)" -p local \
+            -f ./docker-compose.yml -f ./docker-compose.airflow.yml up -d --force-recreate
+
+      - name: Run CI suite
+        run: |
+          make ci-local
+
+      - name: Dump Airflow logs on failure
+        if: failure()
+        working-directory: infra/local
+        run: |
+          docker compose -p local logs --no-color --tail=200 airflow-scheduler airflow-worker airflow-apiserver || true
