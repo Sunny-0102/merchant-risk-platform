@@ -20,6 +20,25 @@ jobs:
         run: |
           docker compose -p local -f docker-compose.yml -f docker-compose.airflow.yml up -d --force-recreate
 
+      - name: Wait for Postgres
+        working-directory: infra/local
+        run: |
+          for i in $(seq 1 60); do
+            docker compose -p local -f docker-compose.yml -f docker-compose.airflow.yml exec -T postgres pg_isready -U app -d appdb && exit 0
+            sleep 2
+          done
+          docker compose -p local -f docker-compose.yml -f docker-compose.airflow.yml ps
+          exit 1
+
+      - name: Wait for Airflow
+        run: |
+          for i in $(seq 1 90); do
+            curl -sf http://localhost:8080/health >/dev/null && exit 0
+            sleep 2
+          done
+          curl -v http://localhost:8080/health || true
+          exit 1
+
       - name: Run CI suite
         run: |
           make ci-local
