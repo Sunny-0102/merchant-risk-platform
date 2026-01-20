@@ -18,6 +18,7 @@ services:
       AIRFLOW__API_AUTH__JWT_SECRET: "lS7A2mK-03QwrWBORlsf6Ywb029O9WvvC-ZtgUDT_Sg="
       AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-apiserver:8080/execution/"
       _PIP_ADDITIONAL_REQUIREMENTS: "apache-airflow-providers-postgres apache-airflow-providers-fab"
+      AIRFLOW_CONN_MRP_POSTGRES: postgresql://app:app@postgres:5432/appdb
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
@@ -42,6 +43,7 @@ services:
       AIRFLOW__API_AUTH__JWT_SECRET: "lS7A2mK-03QwrWBORlsf6Ywb029O9WvvC-ZtgUDT_Sg="
       AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-apiserver:8080/execution/"
       _PIP_ADDITIONAL_REQUIREMENTS: "apache-airflow-providers-postgres apache-airflow-providers-fab"
+      AIRFLOW_CONN_MRP_POSTGRES: postgresql://app:app@postgres:5432/appdb
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
@@ -67,6 +69,7 @@ services:
       AIRFLOW__API_AUTH__JWT_SECRET: "lS7A2mK-03QwrWBORlsf6Ywb029O9WvvC-ZtgUDT_Sg="
       AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-apiserver:8080/execution/"
       _PIP_ADDITIONAL_REQUIREMENTS: "apache-airflow-providers-postgres apache-airflow-providers-fab"
+      AIRFLOW_CONN_MRP_POSTGRES: postgresql://app:app@postgres:5432/appdb
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
@@ -90,6 +93,7 @@ services:
       AIRFLOW__API_AUTH__JWT_SECRET: "lS7A2mK-03QwrWBORlsf6Ywb029O9WvvC-ZtgUDT_Sg="
       AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-apiserver:8080/execution/"
       _PIP_ADDITIONAL_REQUIREMENTS: "apache-airflow-providers-postgres apache-airflow-providers-fab"
+      AIRFLOW_CONN_MRP_POSTGRES: postgresql://app:app@postgres:5432/appdb
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
@@ -113,6 +117,7 @@ services:
       AIRFLOW__API_AUTH__JWT_SECRET: "lS7A2mK-03QwrWBORlsf6Ywb029O9WvvC-ZtgUDT_Sg="
       AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-apiserver:8080/execution/"
       _PIP_ADDITIONAL_REQUIREMENTS: "apache-airflow-providers-postgres apache-airflow-providers-fab"
+      AIRFLOW_CONN_MRP_POSTGRES: postgresql://app:app@postgres:5432/appdb
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
@@ -136,6 +141,7 @@ services:
       AIRFLOW__API_AUTH__JWT_SECRET: "lS7A2mK-03QwrWBORlsf6Ywb029O9WvvC-ZtgUDT_Sg="
       AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-apiserver:8080/execution/"
       _PIP_ADDITIONAL_REQUIREMENTS: "apache-airflow-providers-postgres apache-airflow-providers-fab"
+      AIRFLOW_CONN_MRP_POSTGRES: postgresql://app:app@postgres:5432/appdb
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
