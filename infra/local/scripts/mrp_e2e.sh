@@ -62,6 +62,47 @@ TOKEN="$(curl -s -X POST "${ENDPOINT_URL}/auth/token" \
   -d '{"username":"airflow","password":"airflow"}' \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')"
 
+# MRP_PRECHECK_DAG_READY
+echo "== Precheck: wait for DAG to be available in Airflow API =="
+DAG_URL="${ENDPOINT_URL}/api/v2/dags/mrp_pipeline_dag"
+
+code=""
+body=""
+for i in $(seq 1 90); do
+  resp="$(curl -sS -H "Authorization: Bearer ${TOKEN}" -w "\n%{http_code}" "${DAG_URL}" || true)"
+  body="${resp%$'\n'*}"
+  code="${resp##*$'\n'}"
+  if [ "$code" = "200" ]; then
+    break
+  fi
+  echo "dag not ready yet (http=$code) retry $i/90"
+  sleep 2
+done
+
+if [ "${code:-}" != "200" ]; then
+  echo "ERROR: DAG not available in API after waiting. last_http=${code:-} body=${body:-}"
+  exit 1
+fi
+
+paused="$(printf '%s' "$body" | python3 - <<'PYIN'
+import sys, json
+try:
+    d=json.load(sys.stdin)
+    print(d.get("is_paused"))
+except Exception:
+    print("")
+PYIN
+ 2>/dev/null || true)"
+
+if [ "$paused" = "True" ] || [ "$paused" = "true" ]; then
+  echo "== Unpausing DAG =="
+  curl -sS -X PATCH "${DAG_URL}" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d '{"is_paused": false}' >/dev/null || true
+fi
+
+
 RUN_ID="manual__mrp__$(date -u +%Y%m%dT%H%M%SZ)"
 LOGICAL_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "RUN_ID=$RUN_ID"
@@ -73,6 +114,7 @@ curl -s -X POST "${ENDPOINT_URL}/api/v2/dags/mrp_pipeline_dag/dagRuns" \
   -d "{\"dag_run_id\":\"${RUN_ID}\",\"logical_date\":\"${LOGICAL_DATE}\",\"conf\":{}}" >/dev/null
 
 echo
+st=""
 echo "== 3) Wait for DAG success (poll every 2s, up to 60 polls) =="
 for i in $(seq 1 60); do
   st="$(curl -s "${ENDPOINT_URL}/api/v2/dags/mrp_pipeline_dag/dagRuns/${RUN_ID}" \
@@ -90,6 +132,11 @@ for i in $(seq 1 60); do
 done
 
 echo
+if [ "${st:-}" != "success" ]; then
+  echo "ERROR: Timed out waiting for success. RUN_ID=$RUN_ID last_state=${st:-}"
+  exit 1
+fi
+
 echo "== 4) Validate EVT_ID landed in fact + latest snapshot exists for MID =="
 docker exec -i -e PGPASSWORD=app postgres psql -U app -d appdb -v ON_ERROR_STOP=1 \
   -v evt_id="$EVT_ID" -v mid="$MID" <<SQL
@@ -108,5 +155,17 @@ LIMIT 1;
 SQL
 
 echo
+
+# Hard assertions (fail CI if nothing actually landed)
+FACT_CNT="$(docker exec -i -e PGPASSWORD=app postgres \
+  psql -U app -d appdb -tAc "SELECT COUNT(*) FROM mrp.fact_payment_events WHERE event_id='${EVT_ID}';" | tr -d '[:space:]')"
+SNAP_CNT="$(docker exec -i -e PGPASSWORD=app postgres \
+  psql -U app -d appdb -tAc "SELECT COUNT(*) FROM mrp.merchant_feature_snapshots WHERE merchant_id='${MID}';" | tr -d '[:space:]')"
+
+if [ "${FACT_CNT:-0}" -lt 1 ] || [ "${SNAP_CNT:-0}" -lt 1 ]; then
+  echo "ERROR: E2E validation failed. fact_cnt=${FACT_CNT:-} snap_cnt=${SNAP_CNT:-} EVT_ID=$EVT_ID MID=$MID"
+  exit 1
+fi
+
 echo "✅ E2E PASS: raw -> fact -> snapshot verified"
 echo "RUN_ID=$RUN_ID EVT_ID=$EVT_ID MID=$MID"

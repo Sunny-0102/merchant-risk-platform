@@ -61,6 +61,47 @@ TOKEN="$(curl -s -X POST "${ENDPOINT_URL}/auth/token" \
   -d '{"username":"airflow","password":"airflow"}' \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')"
 
+# MRP_PRECHECK_DAG_READY
+echo "== Precheck: wait for DAG to be available in Airflow API =="
+DAG_URL="${ENDPOINT_URL}/api/v2/dags/mrp_pipeline_dag"
+
+code=""
+body=""
+for i in $(seq 1 90); do
+  resp="$(curl -sS -H "Authorization: Bearer ${TOKEN}" -w "\n%{http_code}" "${DAG_URL}" || true)"
+  body="${resp%$'\n'*}"
+  code="${resp##*$'\n'}"
+  if [ "$code" = "200" ]; then
+    break
+  fi
+  echo "dag not ready yet (http=$code) retry $i/90"
+  sleep 2
+done
+
+if [ "${code:-}" != "200" ]; then
+  echo "ERROR: DAG not available in API after waiting. last_http=${code:-} body=${body:-}"
+  exit 1
+fi
+
+paused="$(printf '%s' "$body" | python3 - <<'PYIN'
+import sys, json
+try:
+    d=json.load(sys.stdin)
+    print(d.get("is_paused"))
+except Exception:
+    print("")
+PYIN
+ 2>/dev/null || true)"
+
+if [ "$paused" = "True" ] || [ "$paused" = "true" ]; then
+  echo "== Unpausing DAG =="
+  curl -sS -X PATCH "${DAG_URL}" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d '{"is_paused": false}' >/dev/null || true
+fi
+
+
 trigger_run () {
   local run_id logical_date
   run_id="manual__mrp__$(date -u +%Y%m%dT%H%M%SZ)"
