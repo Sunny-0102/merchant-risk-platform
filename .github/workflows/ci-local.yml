@@ -16,10 +16,9 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Start local stack (infra/local)
-        working-directory: infra/local
         run: |
-          docker compose --project-directory "$(pwd)" -p local \
-            -f ./docker-compose.yml -f ./docker-compose.airflow.yml up -d --force-recreate
+          docker compose --project-directory "$GITHUB_WORKSPACE" -p local \
+            -f infra/local/docker-compose.yml -f infra/local/docker-compose.airflow.yml up -d --force-recreate
 
       - name: Run CI suite
         run: |
@@ -27,6 +26,6 @@ jobs:
 
       - name: Dump Airflow logs on failure
         if: failure()
-        working-directory: infra/local
         run: |
-          docker compose -p local logs --no-color --tail=200 airflow-scheduler airflow-worker airflow-apiserver || true
+          docker compose --project-directory "$GITHUB_WORKSPACE" -p local \
+            -f infra/local/docker-compose.yml -f infra/local/docker-compose.airflow.yml logs --no-color --tail=200 airflow-scheduler airflow-worker airflow-apiserver || true
