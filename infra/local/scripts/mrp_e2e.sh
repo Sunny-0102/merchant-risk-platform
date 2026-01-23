@@ -4,6 +4,21 @@ set -euo pipefail
 SRC="${SRC:-SYNTH_LIVE}"
 ENDPOINT_URL="${ENDPOINT_URL:-http://localhost:8080}"
 
+uniq8() {
+  python3 - <<'PY'
+import uuid
+print(uuid.uuid4().hex[:8])
+PY
+}
+
+db_logical_date() {
+  docker exec -i -e PGPASSWORD=app postgres psql -U app -d appdb -tA -v ON_ERROR_STOP=1 -c \
+    "SELECT to_char((now() - interval '30 seconds') at time zone 'utc', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"');"
+}
+
+RUN_ID="manual__mrp__$(date -u +%Y%m%dT%H%M%SZ)__$(uniq8)"
+LOGICAL_DATE="$(db_logical_date)"
+
 echo "== 1) Insert one realistic raw event for $SRC =="
 
 ins_out="$(
@@ -102,9 +117,6 @@ if [ "$paused" = "True" ] || [ "$paused" = "true" ]; then
     -d '{"is_paused": false}' >/dev/null || true
 fi
 
-
-RUN_ID="manual__mrp__$(date -u +%Y%m%dT%H%M%SZ)"
-LOGICAL_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "RUN_ID=$RUN_ID"
 echo "LOGICAL_DATE=$LOGICAL_DATE"
 
@@ -156,7 +168,6 @@ SQL
 
 echo
 
-# Hard assertions (fail CI if nothing actually landed)
 FACT_CNT="$(docker exec -i -e PGPASSWORD=app postgres \
   psql -U app -d appdb -tAc "SELECT COUNT(*) FROM mrp.fact_payment_events WHERE event_id='${EVT_ID}';" | tr -d '[:space:]')"
 SNAP_CNT="$(docker exec -i -e PGPASSWORD=app postgres \

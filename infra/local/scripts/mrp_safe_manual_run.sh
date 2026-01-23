@@ -3,6 +3,13 @@ set -euo pipefail
 
 COMPOSE="docker compose"
 
+uniq8() {
+  python3 - <<'PY'
+import uuid
+print(uuid.uuid4().hex[:8])
+PY
+}
+
 echo "== Context =="
 pwd
 $COMPOSE ps
@@ -34,14 +41,15 @@ echo
 echo "== Choose safe logical_date (UTC now - 1 minute) and unique run_id =="
 LOGICAL_DATE="$(python3 - <<'PY'
 from datetime import datetime, timezone, timedelta
-print((datetime.now(timezone.utc) - timedelta(minutes=1)).replace(microsecond=0).isoformat())
+print((datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat())
 PY
 )"
 RUN_ID="manual__mrp__immediate__$(python3 - <<'PY'
 from datetime import datetime, timezone
 print(datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
 PY
-)"
+)__$(uniq8)"
+
 echo "LOGICAL_DATE=$LOGICAL_DATE"
 echo "RUN_ID=$RUN_ID"
 

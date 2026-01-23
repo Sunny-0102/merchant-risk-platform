@@ -5,8 +5,18 @@ from airflow.operators.python import ShortCircuitOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 
-SOURCE = "SYNTH_LIVE"
+DEFAULT_SOURCE = "SYNTH_LIVE"
+ALLOWED_SOURCES = {"SYNTH_LIVE"}
 BATCH_SIZE = 20000
+
+def resolve_source(context) -> str:
+    dag_run = context.get("dag_run")
+    conf = getattr(dag_run, "conf", None) or {}
+    src = conf.get("source", DEFAULT_SOURCE)
+    if src not in ALLOWED_SOURCES:
+        raise ValueError(f"Unsupported source={src}. Allowed: {sorted(ALLOWED_SOURCES)}")
+    return src
+
 
 def has_new_raw(**context) -> bool:
     """
@@ -14,6 +24,8 @@ def has_new_raw(**context) -> bool:
     Also pushes debug numbers into XCom for quick inspection.
     """
     hook = PostgresHook(postgres_conn_id="mrp_postgres")
+
+    source = resolve_source(context)
 
     row = hook.get_first(
         """
@@ -33,7 +45,7 @@ def has_new_raw(**context) -> bool:
           last_raw_id
         FROM w;
         """,
-        parameters={"source": SOURCE},
+        parameters={"source": source},
     )
 
     has_new, new_rows, max_raw_id, last_raw_id = row
@@ -41,6 +53,7 @@ def has_new_raw(**context) -> bool:
     ti.xcom_push(key="new_rows", value=int(new_rows))
     ti.xcom_push(key="max_raw_id", value=int(max_raw_id))
     ti.xcom_push(key="last_raw_id", value=int(last_raw_id))
+    ti.xcom_push(key="source", value=str(source))
 
     return bool(has_new)
 
@@ -64,9 +77,12 @@ with DAG(
         task_id="process_raw_events",
         conn_id="mrp_postgres",
         sql="""
-        SELECT * FROM mrp.process_raw_events(%(source)s, %(batch_size)s);
+        SELECT * FROM mrp.process_raw_events(
+          '{{ ti.xcom_pull(task_ids="gate_new_raw_events", key="source") }}',
+          {{ params.batch_size }}
+        );
         """,
-        parameters={"source": SOURCE, "batch_size": BATCH_SIZE},
+        params={"batch_size": BATCH_SIZE},
     )
 
 

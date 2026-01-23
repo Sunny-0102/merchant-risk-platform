@@ -4,6 +4,22 @@ set -euo pipefail
 SRC="${SRC:-SYNTH_LIVE}"
 ENDPOINT_URL="${ENDPOINT_URL:-http://localhost:8080}"
 
+uniq8() {
+  python3 - <<'PY'
+import uuid
+print(uuid.uuid4().hex[:8])
+PY
+}
+
+db_logical_date() {
+  docker exec -i -e PGPASSWORD=app postgres psql -U app -d appdb -tA -v ON_ERROR_STOP=1 -c \
+    "SELECT to_char((now() - interval '30 seconds') at time zone 'utc', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"');"
+}
+
+mk_run_id() {
+  echo "manual__mrp__$(date -u +%Y%m%dT%H%M%SZ)__$(uniq8)"
+}
+
 echo "== A) Insert ONE realistic raw event for $SRC =="
 
 ins_out="$(
@@ -101,11 +117,10 @@ if [ "$paused" = "True" ] || [ "$paused" = "true" ]; then
     -d '{"is_paused": false}' >/dev/null || true
 fi
 
-
 trigger_run () {
   local run_id logical_date
-  run_id="manual__mrp__$(date -u +%Y%m%dT%H%M%SZ)"
-  logical_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  run_id="$(mk_run_id)"
+  logical_date="$(db_logical_date)"
   curl -s -X POST "${ENDPOINT_URL}/api/v2/dags/mrp_pipeline_dag/dagRuns" \
     -H "Authorization: Bearer ${TOKEN}" \
     -H "Content-Type: application/json" \
