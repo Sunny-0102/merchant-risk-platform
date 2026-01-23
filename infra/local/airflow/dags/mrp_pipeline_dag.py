@@ -78,11 +78,12 @@ with DAG(
         SELECT mrp.recompute_feature_snapshot(
         date_bin(
             '15 minutes',
-            '{{ data_interval_end.in_timezone("UTC") }}'::timestamptz,
+            '{{ dag_run.logical_date | default(dag_run.start_date, true) }}'::timestamptz,
             '1970-01-01'::timestamptz
         )
         ) AS rows_upserted;
         """,
+
     )
 
 
