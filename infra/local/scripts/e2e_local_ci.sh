@@ -47,9 +47,29 @@ wait_for_dag() {
   done
 
   echo "ERROR: DAG not registered in metadb after waiting: ${dag_id}"
-  echo "Current dags list:"
+  echo
+  echo "== Debug: airflow dags list (scheduler) =="
   dc exec -T airflow-scheduler airflow dags list || true
+
+  echo
+  echo "== Debug: dags folder contents (dag-processor) =="
+  dc exec -T airflow-dag-processor bash -lc "ls -la /opt/airflow/dags || true"
+  dc exec -T airflow-dag-processor bash -lc "find /opt/airflow/dags -maxdepth 3 -type f -name '*.py' -print || true"
+
+  echo
+  echo "== Debug: import errors (dag-processor) =="
+  dc exec -T airflow-dag-processor airflow dags list-import-errors || true
+
+  echo
+  echo "== Debug: dag-processor logs (tail) =="
+  dc logs --no-color --tail 200 airflow-dag-processor || true
+
+  echo
+  echo "== Debug: scheduler logs (tail) =="
+  dc logs --no-color --tail 200 airflow-scheduler || true
+
   return 1
+
 }
 
 wait_for_dag "mrp_smoke_postgres"
