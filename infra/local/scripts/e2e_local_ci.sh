@@ -22,6 +22,40 @@ compose() {
 echo
 echo "== 0) Ensure stack is up =="
 compose up -d --build
+echo
+echo "== 0.5) Wait for Airflow to register DAGs in the metadb =="
+
+dc() {
+  docker compose -p local \
+    -f "${LOCAL_DIR}/docker-compose.yml" \
+    -f "${LOCAL_DIR}/docker-compose.airflow.yml" \
+    -f "${LOCAL_DIR}/docker-compose.airflow.unpause.yml" \
+    "$@"
+}
+
+wait_for_dag() {
+  local dag_id="$1"
+  for i in $(seq 1 90); do
+    if dc exec -T airflow-scheduler airflow dags list 2>/dev/null \
+      | awk 'NR>2 {print $1}' \
+      | grep -qx "${dag_id}"; then
+      echo "DAG ready: ${dag_id}"
+      return 0
+    fi
+    echo "waiting for DAG to be registered (${dag_id}) retry ${i}/90"
+    sleep 2
+  done
+
+  echo "ERROR: DAG not registered in metadb after waiting: ${dag_id}"
+  echo "Current dags list:"
+  dc exec -T airflow-scheduler airflow dags list || true
+  return 1
+}
+
+wait_for_dag "mrp_smoke_postgres"
+wait_for_dag "mrp_smoke_ingestion_api"
+wait_for_dag "mrp_smoke_ingest_raw"
+wait_for_dag "mrp_pipeline_dag"
 
 echo
 echo "== 1) Smoke checks (trigger + wait) =="
