@@ -3,7 +3,9 @@ services:
     image: redis:7-alpine
 
   airflow-init:
-    image: apache/airflow:3.1.6
+    build:
+      context: ./airflow
+    image: mrp-airflow:3.1.6-custom
     depends_on:
       - postgres
       - redis
@@ -17,8 +19,8 @@ services:
       AIRFLOW__CORE__FERNET_KEY: "wY-3nxR1Ty-y6rFBgVQRVuF7hdce-FYTxeYg0WRPnLo="
       AIRFLOW__API_AUTH__JWT_SECRET: "lS7A2mK-03QwrWBORlsf6Ywb029O9WvvC-ZtgUDT_Sg="
       AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-apiserver:8080/execution/"
-      _PIP_ADDITIONAL_REQUIREMENTS: "apache-airflow-providers-postgres apache-airflow-providers-fab"
       AIRFLOW_CONN_MRP_POSTGRES: postgresql://app:app@postgres:5432/appdb
+      AIRFLOW_CONN_MRP_INGESTION_API: http://ingestion-api:8000
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
@@ -27,7 +29,7 @@ services:
     command: -lc "airflow db migrate && airflow users create --username airflow --password airflow --firstname Airflow --lastname Admin --role Admin --email airflow@example.com || true"
 
   airflow-apiserver:
-    image: apache/airflow:3.1.6
+    image: mrp-airflow:3.1.6-custom
     depends_on:
       - postgres
       - redis
@@ -42,8 +44,8 @@ services:
       AIRFLOW__CORE__FERNET_KEY: "wY-3nxR1Ty-y6rFBgVQRVuF7hdce-FYTxeYg0WRPnLo="
       AIRFLOW__API_AUTH__JWT_SECRET: "lS7A2mK-03QwrWBORlsf6Ywb029O9WvvC-ZtgUDT_Sg="
       AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-apiserver:8080/execution/"
-      _PIP_ADDITIONAL_REQUIREMENTS: "apache-airflow-providers-postgres apache-airflow-providers-fab"
       AIRFLOW_CONN_MRP_POSTGRES: postgresql://app:app@postgres:5432/appdb
+      AIRFLOW_CONN_MRP_INGESTION_API: http://ingestion-api:8000
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
@@ -53,7 +55,7 @@ services:
     command: api-server
 
   airflow-scheduler:
-    image: apache/airflow:3.1.6
+    image: mrp-airflow:3.1.6-custom
     depends_on:
       - postgres
       - redis
@@ -68,8 +70,8 @@ services:
       AIRFLOW__CORE__FERNET_KEY: "wY-3nxR1Ty-y6rFBgVQRVuF7hdce-FYTxeYg0WRPnLo="
       AIRFLOW__API_AUTH__JWT_SECRET: "lS7A2mK-03QwrWBORlsf6Ywb029O9WvvC-ZtgUDT_Sg="
       AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-apiserver:8080/execution/"
-      _PIP_ADDITIONAL_REQUIREMENTS: "apache-airflow-providers-postgres apache-airflow-providers-fab"
       AIRFLOW_CONN_MRP_POSTGRES: postgresql://app:app@postgres:5432/appdb
+      AIRFLOW_CONN_MRP_INGESTION_API: http://ingestion-api:8000
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
@@ -77,7 +79,7 @@ services:
     command: scheduler
 
   airflow-dag-processor:
-    image: apache/airflow:3.1.6
+    image: mrp-airflow:3.1.6-custom
     depends_on:
       - postgres
       - redis
@@ -92,8 +94,8 @@ services:
       AIRFLOW__CORE__FERNET_KEY: "wY-3nxR1Ty-y6rFBgVQRVuF7hdce-FYTxeYg0WRPnLo="
       AIRFLOW__API_AUTH__JWT_SECRET: "lS7A2mK-03QwrWBORlsf6Ywb029O9WvvC-ZtgUDT_Sg="
       AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-apiserver:8080/execution/"
-      _PIP_ADDITIONAL_REQUIREMENTS: "apache-airflow-providers-postgres apache-airflow-providers-fab"
       AIRFLOW_CONN_MRP_POSTGRES: postgresql://app:app@postgres:5432/appdb
+      AIRFLOW_CONN_MRP_INGESTION_API: http://ingestion-api:8000
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
@@ -101,7 +103,7 @@ services:
     command: dag-processor
 
   airflow-triggerer:
-    image: apache/airflow:3.1.6
+    image: mrp-airflow:3.1.6-custom
     depends_on:
       - postgres
       - redis
@@ -116,8 +118,8 @@ services:
       AIRFLOW__CORE__FERNET_KEY: "wY-3nxR1Ty-y6rFBgVQRVuF7hdce-FYTxeYg0WRPnLo="
       AIRFLOW__API_AUTH__JWT_SECRET: "lS7A2mK-03QwrWBORlsf6Ywb029O9WvvC-ZtgUDT_Sg="
       AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-apiserver:8080/execution/"
-      _PIP_ADDITIONAL_REQUIREMENTS: "apache-airflow-providers-postgres apache-airflow-providers-fab"
       AIRFLOW_CONN_MRP_POSTGRES: postgresql://app:app@postgres:5432/appdb
+      AIRFLOW_CONN_MRP_INGESTION_API: http://ingestion-api:8000
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
@@ -125,7 +127,7 @@ services:
     command: triggerer
 
   airflow-worker:
-    image: apache/airflow:3.1.6
+    image: mrp-airflow:3.1.6-custom
     depends_on:
       - postgres
       - redis
@@ -140,8 +142,8 @@ services:
       AIRFLOW__CORE__FERNET_KEY: "wY-3nxR1Ty-y6rFBgVQRVuF7hdce-FYTxeYg0WRPnLo="
       AIRFLOW__API_AUTH__JWT_SECRET: "lS7A2mK-03QwrWBORlsf6Ywb029O9WvvC-ZtgUDT_Sg="
       AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-apiserver:8080/execution/"
-      _PIP_ADDITIONAL_REQUIREMENTS: "apache-airflow-providers-postgres apache-airflow-providers-fab"
       AIRFLOW_CONN_MRP_POSTGRES: postgresql://app:app@postgres:5432/appdb
+      AIRFLOW_CONN_MRP_INGESTION_API: http://ingestion-api:8000
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
