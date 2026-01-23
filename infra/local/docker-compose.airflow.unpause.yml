@@ -1,0 +1,13 @@
+services:
+  airflow-apiserver:
+    environment:
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "False"
+  airflow-scheduler:
+    environment:
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "False"
+  airflow-dag-processor:
+    environment:
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "False"
+  airflow-worker:
+    environment:
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "False"
