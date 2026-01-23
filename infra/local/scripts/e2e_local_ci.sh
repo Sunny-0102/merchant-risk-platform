@@ -11,117 +11,238 @@ echo "LOCAL_DIR=${LOCAL_DIR}"
 
 cd "${LOCAL_DIR}"
 
-dc() {
+compose() {
   docker compose -p local \
-    -f "${LOCAL_DIR}/docker-compose.yml" \
-    -f "${LOCAL_DIR}/docker-compose.airflow.yml" \
-    -f "${LOCAL_DIR}/docker-compose.airflow.unpause.yml" \
+    -f docker-compose.yml \
+    -f docker-compose.airflow.yml \
+    -f docker-compose.airflow.unpause.yml \
     "$@"
 }
 
-on_err() {
-  echo
-  echo "❌ ERROR: local CI failed. Dumping quick diagnostics..."
-  echo
-  echo "== docker compose ps =="
-  dc ps || true
+# -------- wait helpers --------
 
-  echo
-  echo "== scheduler logs (tail) =="
-  dc logs --no-color --tail 200 airflow-scheduler || true
-
-  echo
-  echo "== dag-processor logs (tail) =="
-  dc logs --no-color --tail 200 airflow-dag-processor || true
-
-  echo
-  echo "== worker logs (tail) =="
-  dc logs --no-color --tail 200 airflow-worker || true
-}
-trap on_err ERR
-
-wait_service() {
+wait_for_service_running() {
   local svc="$1"
-  local tries="${2:-90}"
-  for i in $(seq 1 "${tries}"); do
-    if dc ps --status running --services 2>/dev/null | grep -qx "${svc}"; then
-      echo "Service running: ${svc}"
-      return 0
+  for i in $(seq 1 90); do
+    local cid running
+    cid="$(compose ps -q "${svc}" 2>/dev/null || true)"
+    if [[ -n "${cid}" ]]; then
+      running="$(docker inspect -f '{{.State.Running}}' "${cid}" 2>/dev/null || echo "false")"
+      if [[ "${running}" == "true" ]]; then
+        echo "Service running: ${svc}"
+        return 0
+      fi
     fi
-    echo "waiting for service to be running (${svc}) retry ${i}/${tries}"
+    echo "waiting for service to be running (${svc}) retry ${i}/90"
     sleep 2
   done
   echo "ERROR: service not running: ${svc}"
-  dc ps || true
+  compose ps || true
+  return 1
+}
+
+wait_for_init_container_success() {
+  local svc="$1"
+  for i in $(seq 1 90); do
+    local cid status exitcode
+    cid="$(compose ps -q "${svc}" 2>/dev/null || true)"
+    if [[ -n "${cid}" ]]; then
+      status="$(docker inspect -f '{{.State.Status}}' "${cid}" 2>/dev/null || echo "")"
+      exitcode="$(docker inspect -f '{{.State.ExitCode}}' "${cid}" 2>/dev/null || echo "")"
+
+      if [[ "${status}" == "exited" && "${exitcode}" == "0" ]]; then
+        echo "Init container completed OK: ${svc}"
+        return 0
+      fi
+
+      if [[ "${status}" == "exited" && "${exitcode}" != "0" ]]; then
+        echo "ERROR: init container exited non-zero: ${svc} (exitcode=${exitcode})"
+        compose logs --no-color --tail 200 "${svc}" || true
+        return 1
+      fi
+    fi
+
+    echo "waiting for init container to complete (${svc}) retry ${i}/90"
+    sleep 2
+  done
+
+  echo "ERROR: init container did not complete: ${svc}"
+  compose ps || true
+  compose logs --no-color --tail 200 "${svc}" || true
+  return 1
+}
+
+wait_for_airflow_db() {
+  for i in $(seq 1 90); do
+    if compose exec -T airflow-scheduler airflow db check >/dev/null 2>&1; then
+      # If db check passes, migrations are at least reachable/valid for the metadb.
+      echo "Airflow metadb reachable (db check OK)"
+      return 0
+    fi
+    echo "waiting for Airflow metadb connectivity/migrations retry ${i}/90"
+    sleep 2
+  done
+  echo "ERROR: Airflow metadb not ready after waiting"
+  compose logs --no-color --tail 200 airflow-scheduler || true
+  return 1
+}
+
+wait_for_app_postgres() {
+  for i in $(seq 1 90); do
+    if compose exec -T postgres pg_isready -U app -d appdb >/dev/null 2>&1; then
+      echo "App Postgres ready (pg_isready OK)"
+      return 0
+    fi
+    echo "waiting for app postgres readiness retry ${i}/90"
+    sleep 2
+  done
+  echo "ERROR: app postgres not ready after waiting"
+  compose logs --no-color --tail 200 postgres || true
   return 1
 }
 
 wait_for_dag_in_metadb() {
   local dag_id="$1"
-  local tries="${2:-90}"
-
-  for i in $(seq 1 "${tries}"); do
-    if dc exec -T airflow-scheduler airflow dags list -o plain 2>/dev/null \
-      | awk '{print $1}' \
+  for i in $(seq 1 90); do
+    if compose exec -T airflow-scheduler airflow dags list 2>/dev/null \
+      | awk 'NR>2 {print $1}' \
       | grep -qx "${dag_id}"; then
       echo "DAG ready in metadb: ${dag_id}"
       return 0
     fi
-    echo "waiting for DAG to be registered in metadb (${dag_id}) retry ${i}/${tries}"
+    echo "waiting for DAG to be registered (${dag_id}) retry ${i}/90"
     sleep 2
   done
 
   echo "ERROR: DAG not registered in metadb after waiting: ${dag_id}"
 
   echo
-  echo "== Debug: airflow dags list (DB-backed) =="
-  dc exec -T airflow-scheduler airflow dags list -o table || true
+  echo "== Debug: airflow dags list (scheduler) =="
+  compose exec -T airflow-scheduler airflow dags list || true
 
   echo
-  echo "== Debug: airflow dags list --local (file parse) =="
-  dc exec -T airflow-scheduler airflow dags list --local -o table || true
-
-  echo
-  echo "== Debug: import errors (local + DB) =="
-  dc exec -T airflow-scheduler airflow dags list-import-errors --local -o table || true
-  dc exec -T airflow-scheduler airflow dags list-import-errors -o table || true
-
-  echo
-  echo "== Debug: dags folder listing (scheduler) =="
-  dc exec -T airflow-scheduler bash -lc "ls -la /opt/airflow/dags || true" || true
-  dc exec -T airflow-scheduler bash -lc "find /opt/airflow/dags -maxdepth 3 -type f -name '*.py' -print || true" || true
-
-  echo
-  echo "== Debug: scheduler logs (tail) =="
-  dc logs --no-color --tail 200 airflow-scheduler || true
+  echo "== Debug: import errors (scheduler) =="
+  compose exec -T airflow-scheduler airflow dags list-import-errors || true
 
   echo
   echo "== Debug: dag-processor logs (tail) =="
-  dc logs --no-color --tail 200 airflow-dag-processor || true
+  compose logs --no-color --tail 200 airflow-dag-processor || true
+
+  echo
+  echo "== Debug: scheduler logs (tail) =="
+  compose logs --no-color --tail 200 airflow-scheduler || true
 
   return 1
 }
 
+dump_smoke_failure() {
+  local dag_id="$1"
+  local run_id="$2"
+
+  echo
+  echo "===================="
+  echo "SMOKE FAILED: dag=${dag_id} run_id=${run_id}"
+  echo "===================="
+  echo
+
+  echo "== airflow dags list-runs (worker) =="
+  compose exec -T airflow-worker bash -lc \
+    "airflow dags list-runs -d '${dag_id}' -o table | tail -n 60" || true
+
+  echo
+  echo "== airflow tasks list (worker) =="
+  compose exec -T airflow-worker bash -lc \
+    "airflow tasks list '${dag_id}' || true" || true
+
+  echo
+  echo "== airflow tasks states-for-dag-run (worker) =="
+  compose exec -T airflow-worker bash -lc \
+    "airflow tasks states-for-dag-run '${dag_id}' '${run_id}' -o table || true" || true
+
+  echo
+  echo "== Search task logs (worker) =="
+  compose exec -T airflow-worker bash -lc "
+    set -e
+    LOGROOT=\${AIRFLOW_HOME:-/opt/airflow}/logs
+    echo \"LOGROOT=\$LOGROOT\"
+    echo \"(showing up to 50 matching log files)\"
+    find \"\$LOGROOT\" -type f -path \"*${dag_id}*\" -path \"*${run_id}*\" -print | head -n 50 || true
+    echo
+    echo \"(tailing up to 5 matching log files)\"
+    files=\$(find \"\$LOGROOT\" -type f -path \"*${dag_id}*\" -path \"*${run_id}*\" -print | head -n 5 || true)
+    for f in \$files; do
+      echo
+      echo \"--- tail: \$f ---\"
+      tail -n 200 \"\$f\" || true
+    done
+  " || true
+
+  echo
+  echo "== scheduler logs (tail) =="
+  compose logs --no-color --tail 200 airflow-scheduler || true
+
+  echo
+  echo "== worker logs (tail) =="
+  compose logs --no-color --tail 200 airflow-worker || true
+}
+
+wait_for_smoke() {
+  local dag_id="$1"
+  local run_id="$2"
+
+  echo "-- waiting for ${dag_id} (run_id=${run_id})"
+  for i in $(seq 1 60); do
+    local st
+    st="$(compose exec -T airflow-worker bash -lc \
+      "airflow dags state '${dag_id}' '${run_id}' 2>/dev/null | tail -n1 | tr -d '\r' || true")"
+    echo "   poll ${i} state=${st}"
+
+    if [[ "${st}" == "success" ]]; then
+      return 0
+    fi
+
+    if [[ "${st}" == "failed" ]]; then
+      dump_smoke_failure "${dag_id}" "${run_id}"
+      return 2
+    fi
+
+    sleep 2
+  done
+
+  echo "ERROR: timeout waiting for ${dag_id} (run_id=${run_id})"
+  dump_smoke_failure "${dag_id}" "${run_id}" || true
+  return 3
+}
+
+# -------- main flow --------
+
 echo
 echo "== 0) Ensure stack is up =="
-dc up -d --build
+compose up -d --build
 
-# Ensure core services are actually running before we do any Airflow CLI work
-wait_service postgres
-wait_service airflow-dag-processor
-wait_service airflow-worker
-wait_service airflow-apiserver
-wait_service airflow-triggerer
-wait_service airflow-scheduler
+# Wait for core containers
+wait_for_service_running postgres
+wait_for_service_running airflow-dag-processor
+wait_for_service_running airflow-worker
+wait_for_service_running airflow-apiserver
+wait_for_service_running airflow-triggerer
+wait_for_service_running airflow-scheduler
+wait_for_service_running ingestion-api
+
+# Wait for airflow init container (this is a common CI race if you trigger DAGs too early)
+wait_for_init_container_success airflow-init
 
 echo
 echo "== 0.5a) Wait for Airflow DB connectivity + migrations =="
-dc exec -T airflow-scheduler airflow db check --retry 30 --retry-delay 2
-dc exec -T airflow-scheduler airflow db check-migrations -t 180
+wait_for_airflow_db
 
 echo
-echo "== 0.5b) Force DAG serialization into the metadb =="
-dc exec -T airflow-scheduler airflow dags reserialize
+echo "== 0.5b) Wait for app Postgres readiness =="
+wait_for_app_postgres
+
+echo
+echo "== 0.5c) Force DAG serialization into the metadb =="
+compose exec -T airflow-scheduler airflow dags reserialize
 
 echo
 echo "== 0.6) Wait for required DAGs to be present in the metadb =="
@@ -132,32 +253,30 @@ wait_for_dag_in_metadb "mrp_pipeline_dag"
 
 echo
 echo "== 1) Smoke checks (trigger + wait) =="
+
+# Keep a logical_date, but poll by run_id (more deterministic) :contentReference[oaicite:1]{index=1}
 LOGICAL_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 RID_PG="manual__smoke__pg__$(date -u +%Y%m%dT%H%M%SZ)__$RANDOM"
 RID_API="manual__smoke__api__$(date -u +%Y%m%dT%H%M%SZ)__$RANDOM"
 RID_ING="manual__smoke__ingest__$(date -u +%Y%m%dT%H%M%SZ)__$RANDOM"
 
-dc exec -T airflow-worker bash -lc "
+echo "Smoke run_ids:"
+echo "  mrp_smoke_postgres      run_id=${RID_PG}"
+echo "  mrp_smoke_ingestion_api run_id=${RID_API}"
+echo "  mrp_smoke_ingest_raw    run_id=${RID_ING}"
+echo "  logical_date=${LOGICAL_DATE}"
+
+compose exec -T airflow-worker bash -lc "
   set -e
-  airflow dags trigger mrp_smoke_postgres       -r '${RID_PG}'  -l '${LOGICAL_DATE}'
-  airflow dags trigger mrp_smoke_ingestion_api  -r '${RID_API}' -l '${LOGICAL_DATE}'
-  airflow dags trigger mrp_smoke_ingest_raw     -r '${RID_ING}' -l '${LOGICAL_DATE}'
+  airflow dags trigger mrp_smoke_postgres      -r '${RID_PG}'  -l '${LOGICAL_DATE}'
+  airflow dags trigger mrp_smoke_ingestion_api -r '${RID_API}' -l '${LOGICAL_DATE}'
+  airflow dags trigger mrp_smoke_ingest_raw    -r '${RID_ING}' -l '${LOGICAL_DATE}'
 "
 
-dc exec -T airflow-worker bash -lc "
-  set -e
-  for dag in mrp_smoke_postgres mrp_smoke_ingestion_api mrp_smoke_ingest_raw; do
-    echo \"-- waiting for \$dag (logical_date=${LOGICAL_DATE})\"
-    for i in \$(seq 1 60); do
-      st=\$(airflow dags state \"\$dag\" '${LOGICAL_DATE}' 2>/dev/null | tail -n1 | tr -d '\r' || true)
-      echo \"   poll \$i state=\$st\"
-      if [[ \"\$st\" == \"success\" ]]; then break; fi
-      if [[ \"\$st\" == \"failed\" ]]; then exit 2; fi
-      sleep 2
-    done
-  done
-"
+wait_for_smoke "mrp_smoke_postgres"      "${RID_PG}"
+wait_for_smoke "mrp_smoke_ingestion_api" "${RID_API}"
+wait_for_smoke "mrp_smoke_ingest_raw"    "${RID_ING}"
 
 echo
 echo "== 2) Run E2E harness =="
