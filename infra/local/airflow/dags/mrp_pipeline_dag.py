@@ -94,13 +94,13 @@ with DAG(
         SELECT mrp.recompute_feature_snapshot(
         date_bin(
             '15 minutes',
-            '{{ dag_run.logical_date | default(dag_run.start_date, true) }}'::timestamptz,
+            '{{ data_interval_end }}'::timestamptz - interval '1 microsecond',
             '1970-01-01'::timestamptz
-        )
+        ) + interval '15 minutes'
         ) AS rows_upserted;
         """,
-
     )
+
 
 
     gate_new_data >> process_raw >> recompute_snapshot
