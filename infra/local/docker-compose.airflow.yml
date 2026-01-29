@@ -6,6 +6,7 @@ services:
     build:
       context: ./airflow
     image: mrp-airflow:3.1.6-custom
+    user: "${AIRFLOW_UID:-50000}:0"
     depends_on:
       - postgres
       - redis
@@ -30,6 +31,7 @@ services:
 
   airflow-apiserver:
     image: mrp-airflow:3.1.6-custom
+    user: "${AIRFLOW_UID:-50000}:0"
     depends_on:
       - postgres
       - redis
@@ -56,6 +58,7 @@ services:
 
   airflow-scheduler:
     image: mrp-airflow:3.1.6-custom
+    user: "${AIRFLOW_UID:-50000}:0"
     depends_on:
       - postgres
       - redis
@@ -80,6 +83,7 @@ services:
 
   airflow-dag-processor:
     image: mrp-airflow:3.1.6-custom
+    user: "${AIRFLOW_UID:-50000}:0"
     depends_on:
       - postgres
       - redis
@@ -104,6 +108,7 @@ services:
 
   airflow-triggerer:
     image: mrp-airflow:3.1.6-custom
+    user: "${AIRFLOW_UID:-50000}:0"
     depends_on:
       - postgres
       - redis
@@ -128,6 +133,7 @@ services:
 
   airflow-worker:
     image: mrp-airflow:3.1.6-custom
+    user: "${AIRFLOW_UID:-50000}:0"
     depends_on:
       - postgres
       - redis

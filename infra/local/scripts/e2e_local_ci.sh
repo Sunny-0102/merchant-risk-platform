@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Match Airflow container UID to the host (fixes /opt/airflow/logs bind-mount permissions)
+export AIRFLOW_UID="${AIRFLOW_UID:-$(id -u)}"
+
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../../.." && pwd)"
 LOCAL_DIR="${REPO_ROOT}/infra/local"
+# Ensure bind-mount dirs exist with sane perms (avoids /opt/airflow/logs PermissionError in CI)
+mkdir -p "${LOCAL_DIR}/airflow/dags" "${LOCAL_DIR}/airflow/logs" "${LOCAL_DIR}/airflow/plugins"
+chmod -R a+rwx "${LOCAL_DIR}/airflow/logs"
+
 
 echo "Running local E2E..."
 echo "REPO_ROOT=${REPO_ROOT}"

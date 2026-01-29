@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Match Airflow container UID to the host (fixes /opt/airflow/logs bind-mount permissions)
+export AIRFLOW_UID="${AIRFLOW_UID:-$(id -u)}"
+
 
 SRC="${SRC:-SYNTH_LIVE}"
 ENDPOINT_URL="${ENDPOINT_URL:-http://localhost:8080}"
