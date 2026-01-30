@@ -30,14 +30,26 @@ jobs:
           docker compose -p local -f docker-compose.yml -f docker-compose.airflow.yml ps
           exit 1
 
-      - name: Wait for Airflow
+      - name: Wait for Airflow (metadb ready)
+        working-directory: infra/local
         run: |
-          for i in $(seq 1 90); do
-            curl -sf http://localhost:8080/api/v2/monitor/health >/dev/null && exit 0
+          set -euo pipefail
+          for i in $(seq 1 180); do
+            if docker compose -p local -f docker-compose.yml -f docker-compose.airflow.yml exec -T airflow-scheduler airflow db check >/dev/null 2>&1; then
+              echo "Airflow metadb ready"
+              exit 0
+            fi
+            echo "waiting for Airflow metadb (airflow db check) retry ${i}/180"
             sleep 2
           done
-          curl -v http://localhost:8080/api/v2/monitor/health || true
+
+          echo "Airflow not ready; dumping container status + logs"
+          docker compose -p local -f docker-compose.yml -f docker-compose.airflow.yml ps || true
+          docker compose -p local -f docker-compose.yml -f docker-compose.airflow.yml logs --no-color --tail=200 airflow-scheduler airflow-apiserver airflow-worker airflow-dag-processor || true
           exit 1
+
+
+
 
       - name: Run CI suite
         run: |
