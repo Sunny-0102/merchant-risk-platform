@@ -1,20 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Match Airflow container UID to the host (fixes /opt/airflow/logs bind-mount permissions)
-export AIRFLOW_UID="${AIRFLOW_UID:-$(id -u)}"
 
+# Match Airflow container UID to the host (fixes /opt/airflow/logs bind-mount permissions)
+# Airflow's docker-compose guidance relies on AIRFLOW_UID to avoid root-owned bind-mount files.
+export AIRFLOW_UID="${AIRFLOW_UID:-$(id -u)}"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../../.." && pwd)"
 LOCAL_DIR="${REPO_ROOT}/infra/local"
-# Ensure bind-mount dirs exist with sane perms (avoids /opt/airflow/logs PermissionError in CI)
-mkdir -p "${LOCAL_DIR}/airflow/dags" "${LOCAL_DIR}/airflow/logs" "${LOCAL_DIR}/airflow/plugins"
-chmod -R a+rwx "${LOCAL_DIR}/airflow/logs"
-
 
 echo "Running local E2E..."
 echo "REPO_ROOT=${REPO_ROOT}"
 echo "LOCAL_DIR=${LOCAL_DIR}"
+echo "AIRFLOW_UID=${AIRFLOW_UID}"
 
 cd "${LOCAL_DIR}"
 
@@ -36,6 +34,37 @@ pg_scalar() {
   # Usage: pg_scalar "select 1"
   compose exec -T -e PGPASSWORD=app postgres \
     psql -U app -d appdb -v ON_ERROR_STOP=1 -tAc "$1" | tr -d '[:space:]'
+}
+
+ensure_bind_mount_dirs() {
+  # IMPORTANT:
+  # - Docker will create missing bind-mount host dirs as root, which can break later writes.
+  # - On GitHub Actions (and some containerized runners), chmod/chown on the workspace can be blocked (EPERM).
+  # So: create dirs, but do NOT hard-fail on permission twiddling.
+  log_step "0) Ensure bind-mount directories exist on host"
+  mkdir -p "${LOCAL_DIR}/airflow/dags" "${LOCAL_DIR}/airflow/logs" "${LOCAL_DIR}/airflow/plugins"
+
+  # Helpful debug (never fail CI because of ls/stat weirdness)
+  ls -ld "${LOCAL_DIR}/airflow" "${LOCAL_DIR}/airflow/dags" "${LOCAL_DIR}/airflow/logs" "${LOCAL_DIR}/airflow/plugins" || true
+}
+
+fix_bind_mount_ownership_in_docker_best_effort() {
+  # Best-effort: if anything did get created root-owned, fix it from inside Docker as root.
+  # This avoids relying on host chmod, which can be blocked on some CI mounts.
+  #
+  # Only do this on Linux (GitHub-hosted runners). On macOS Docker Desktop, ownership semantics can be different.
+  if [[ "$(uname -s)" != "Linux" ]]; then
+    return 0
+  fi
+
+  log_step "0.1) Best-effort: normalize bind-mount ownership from inside Docker (Linux only)"
+  # This uses the airflow-scheduler service so the same volumes are mounted.
+  # --no-deps: don't start/require dependencies; --rm: clean up; --user 0:0: root inside container
+  compose run --rm --no-deps --user 0:0 airflow-scheduler bash -lc "
+    set -e
+    mkdir -p /opt/airflow/dags /opt/airflow/logs /opt/airflow/plugins
+    chown -R ${AIRFLOW_UID}:0 /opt/airflow/dags /opt/airflow/logs /opt/airflow/plugins || true
+  " || true
 }
 
 wait_for_airflow_init() {
@@ -85,9 +114,7 @@ wait_for_airflow_metadb() {
 wait_for_appdb() {
   log_step "0.5a) Wait for appdb connectivity"
   for i in $(seq 1 120); do
-    # Fast reachability check
     if compose exec -T postgres pg_isready -U app -d appdb >/dev/null 2>&1; then
-      # Actual query check
       if pg_scalar "select 1" >/dev/null 2>&1; then
         echo "appdb ready"
         return 0
@@ -103,7 +130,6 @@ wait_for_appdb() {
 }
 
 ensure_raw_events_compat_view() {
-  # If mrp.raw_events is missing but raw_realtime_events exists, create a simple updatable view alias.
   compose exec -T -e PGPASSWORD=app postgres psql -U app -d appdb -v ON_ERROR_STOP=1 -c "
 DO \$\$
 BEGIN
@@ -120,12 +146,10 @@ END
 wait_for_appdb_bootstrap() {
   log_step "0.5a) Wait for appdb bootstrap objects"
   for i in $(seq 1 120); do
-    # Accept either table name; then ensure mrp.raw_events exists (view) for backward compatibility.
     raw_obj="$(pg_scalar "select coalesce(to_regclass('mrp.raw_events')::text, to_regclass('mrp.raw_realtime_events')::text, '')" || true)"
     if [[ -n "${raw_obj}" ]]; then
       ensure_raw_events_compat_view || true
 
-      # Validate key objects exist (adjust if you add/remove core tables)
       fact_ok="$(pg_scalar "select coalesce(to_regclass('mrp.fact_payment_events')::text,'')" || true)"
       snap_ok="$(pg_scalar "select coalesce(to_regclass('mrp.merchant_feature_snapshots')::text,'')" || true)"
       dim_ok="$(pg_scalar "select coalesce(to_regclass('mrp.dim_merchant')::text,'')" || true)"
@@ -141,7 +165,6 @@ wait_for_appdb_bootstrap() {
   done
 
   echo "ERROR: appdb bootstrap not ready"
-  # Diagnostics
   compose exec -T -e PGPASSWORD=app postgres psql -U app -d appdb -c "\dn+" || true
   compose exec -T -e PGPASSWORD=app postgres psql -U app -d appdb -c "\dt mrp.*" || true
   compose exec -T -e PGPASSWORD=app postgres psql -U app -d appdb -c "\dv mrp.*" || true
@@ -215,8 +238,12 @@ debug_failed_smoke() {
 }
 
 # ---------- main ----------
+ensure_bind_mount_dirs
+
 log_step "0) Ensure stack is up"
 compose up -d --build
+
+fix_bind_mount_ownership_in_docker_best_effort
 
 wait_for_airflow_init
 wait_for_airflow_metadb
@@ -260,7 +287,6 @@ compose exec -T airflow-worker bash -lc "
     done
   done
 " || {
-  # Identify which smoke failed quickly for debug.
   for dag in mrp_smoke_postgres mrp_smoke_ingestion_api mrp_smoke_ingest_raw; do
     st="$(compose exec -T airflow-worker bash -lc "airflow dags state '${dag}' '${LOGICAL_DATE}' 2>/dev/null | tail -n1 | tr -d '\r' || true")"
     if [[ "${st}" == "failed" ]]; then
