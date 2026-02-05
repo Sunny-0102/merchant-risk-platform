@@ -1,7 +1,7 @@
 import pendulum
 
 from airflow import DAG
-from airflow.operators.python import ShortCircuitOperator
+from airflow.providers.standard.operators.python import ShortCircuitOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 
@@ -91,14 +91,26 @@ with DAG(
         task_id="recompute_feature_snapshot",
         conn_id="mrp_postgres",
         sql="""
-        SELECT mrp.recompute_feature_snapshot(
-        date_bin(
-            '15 minutes',
-            '{{ data_interval_end }}'::timestamptz - interval '1 microsecond',
-            '1970-01-01'::timestamptz
-        ) + interval '15 minutes'
-        ) AS rows_upserted;
+        WITH params AS (
+            SELECT
+                date_bin(
+                '15 minutes',
+                 '{{ data_interval_end | ts }}'::timestamptz- interval '1 microsecond',
+                '1970-01-01'::timestamptz
+                ) + interval '15 minutes' AS bucket_end
+            ),
+            buckets AS (
+            SELECT bucket_end - (i * interval '15 minutes') AS snapshot_time_utc
+            FROM params, generate_series(0, 5) AS i   -- last 6 buckets = 90 minutes
+            )
+            SELECT COALESCE(
+            SUM(mrp.recompute_feature_snapshot(snapshot_time_utc))::bigint,
+            0
+            ) AS rows_upserted
+            FROM buckets;
+
         """,
+        show_return_value_in_logs=True
     )
 
 
