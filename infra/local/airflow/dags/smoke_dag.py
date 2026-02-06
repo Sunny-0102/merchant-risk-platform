@@ -1,6 +1,6 @@
 import pendulum
 from airflow import DAG
-from airflow.operators.empty import EmptyOperator
+from airflow.providers.standard.operators.empty import EmptyOperator
 
 with DAG(
     dag_id="smoke_dag",

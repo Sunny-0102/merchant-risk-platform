@@ -14,9 +14,15 @@ DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://app:app@postgres:5432/app
 app = FastAPI(title="Merchant Risk Platform - Ingestion API", version="0.1.0")
 
 
-def db_conn():
-    # dict_row makes cursor.fetchone() return a dict (nice for JSON APIs)
-    return psycopg.connect(DATABASE_URL, autocommit=True, row_factory=dict_row)
+def db_conn() -> psycopg.Connection[dict[str, Any]]:
+    # row_factory controls the row type returned by cursors (dict rows in our case)
+    return psycopg.connect(
+        DATABASE_URL,
+        autocommit=True,
+        row_factory=dict_row,  # type: ignore[arg-type]
+    )
+
+
 
 
 @app.get("/healthz")
@@ -48,6 +54,8 @@ def ingest_raw(body: RawEventIn) -> Dict[str, Any]:
                     (body.source, json.dumps(body.payload)),
                 )
                 row = cur.fetchone()
+                if row is None:
+                    raise HTTPException(status_code=500, detail="db_insert_failed: no row returned")
                 return {"status": "ok", "id": row["id"], "received_at": row["received_at"].isoformat()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"db_insert_failed: {e}")

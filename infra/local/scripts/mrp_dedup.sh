@@ -25,9 +25,9 @@ mk_run_id() {
   echo "manual__mrp__e2e__$(date -u +%Y%m%dT%H%M%SZ)__$(uniq8)"
 }
 
-TOKEN="$(curl -s -X POST "${ENDPOINT_URL}/auth/token" \
+TOKEN="$(curl -sS -f -X POST "${ENDPOINT_URL}/auth/token" \
   -H "Content-Type: application/json" \
-  -d '{"username":"airflow","password":"airflow"}' \
+  -d "{\"username\":\"${AIRFLOW_USER:-app}\",\"password\":\"${AIRFLOW_PASSWORD:-app}\"}" \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')"
 
 # MRP_PRECHECK_DAG_READY
