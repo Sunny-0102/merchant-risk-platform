@@ -28,6 +28,10 @@ def main():
     now = datetime.now(timezone.utc)
     drift_start = now - timedelta(days=args.drift_days_ago)
 
+    NONE = np.array(None, dtype=object)
+    drift_start_ts = pd.Timestamp(drift_start)
+    recent_cutoff = pd.Timestamp(now - timedelta(days=14))
+
     # ===== dim_merchant =====
     segments = ["SMB","MID_MARKET","ENTERPRISE"]
     risk_tiers = ["LOW","MEDIUM","HIGH"]
@@ -61,7 +65,7 @@ def main():
     countries = ["US","CA","GB","DE","FR","AU","IN","BR","MX","JP"]
     merchant_country = rng.choice(countries, size=args.merchants, p=[0.82,0.03,0.03,0.02,0.02,0.02,0.02,0.02,0.01,0.01])
     us_states = ["NY","CA","TX","FL","IL","WA","MA","NJ","PA","GA","NC","VA","AZ","CO","MI"]
-    state = np.where(merchant_country=="US", rng.choice(us_states, size=args.merchants), None)
+    state = np.where(merchant_country=="US", rng.choice(us_states, size=args.merchants), NONE)
     tz_us = ["America/New_York","America/Chicago","America/Denver","America/Los_Angeles"]
     tz_other = ["Europe/London","Europe/Berlin","Asia/Tokyo"]
     timezone_str = np.where(merchant_country=="US",
@@ -156,7 +160,7 @@ def main():
             p[4] += 0.015; p[5] += 0.01; p[6] += 0.005; p[3] -= 0.03
 
         # concept drift: after drift_start, refunds/disputes increase for certain MCCs
-        if event_time[i].to_pydatetime() >= drift_start and m_mcc[i] in ("5812","5999"):
+        if event_time[i] >= drift_start_ts and m_mcc[i] in ("5812","5999"):
             p[5] += 0.02  # refunds
             p[6] += 0.01  # disputes created
             p[3] -= 0.03
@@ -170,15 +174,15 @@ def main():
     event_id = np.array([u("evt_") for _ in range(args.events)], dtype=object)
     order_id = np.array([u("ord_") for _ in range(args.events)], dtype=object)
     authorization_id = np.where(np.isin(event_type, ["PAYMENT.AUTHORIZATION.CREATED","PAYMENT.AUTHORIZATION.VOIDED"]),
-                                np.array([u("aut_") for _ in range(args.events)], dtype=object), None)
+                                np.array([u("aut_") for _ in range(args.events)], dtype=object), NONE)
     capture_id = np.where(np.isin(event_type, ["PAYMENT.CAPTURE.COMPLETED","PAYMENT.CAPTURE.DENIED","PAYMENT.CAPTURE.REFUNDED"]),
-                          np.array([u("cap_") for _ in range(args.events)], dtype=object), None)
+                          np.array([u("cap_") for _ in range(args.events)], dtype=object), NONE)
     refund_id = np.where(event_type=="PAYMENT.CAPTURE.REFUNDED",
-                         np.array([u("rfd_") for _ in range(args.events)], dtype=object), None)
+                         np.array([u("rfd_") for _ in range(args.events)], dtype=object), NONE)
     dispute_id = np.where(np.isin(event_type, ["CUSTOMER.DISPUTE.CREATED","CUSTOMER.DISPUTE.RESOLVED"]),
-                          np.array([u("dsp_") for _ in range(args.events)], dtype=object), None)
+                          np.array([u("dsp_") for _ in range(args.events)], dtype=object), NONE)
     payout_id = np.where(event_type=="PAYOUTS.PAYOUT.COMPLETED",
-                         np.array([u("pyo_") for _ in range(args.events)], dtype=object), None)
+                         np.array([u("pyo_") for _ in range(args.events)], dtype=object), NONE)
 
     # status
     status = np.full(args.events, "UNKNOWN", dtype=object)
@@ -211,10 +215,10 @@ def main():
     payment_method = rng.choice(["CARD","BANK_TRANSFER","WALLET","BNPL"], size=args.events, p=[0.72,0.08,0.15,0.05])
     card_brand = np.where(payment_method=="CARD",
                           rng.choice(["VISA","MASTERCARD","AMEX","DISCOVER"], size=args.events, p=[0.52,0.34,0.1,0.04]),
-                          None)
+                          NONE)
     channel = rng.choice(["ECOM","POS","INVOICE","SUBSCRIPTION"], size=args.events, p=[0.62,0.18,0.1,0.1])
     card_present = (channel=="POS")
-    three_ds_result = np.where(channel=="ECOM", rng.choice(["AUTHENTICATED","ATTEMPTED","NOT_SUPPORTED"], size=args.events, p=[0.55,0.25,0.20]), None)
+    three_ds_result = np.where(channel=="ECOM", rng.choice(["AUTHENTICATED","ATTEMPTED","NOT_SUPPORTED"], size=args.events, p=[0.55,0.25,0.20]), NONE)
 
     avs_result = rng.choice(["Y","N","A","Z","U"], size=args.events, p=[0.80,0.08,0.05,0.04,0.03])
     cvv_result = rng.choice(["M","N","P","U"], size=args.events, p=[0.86,0.06,0.05,0.03])
@@ -233,8 +237,8 @@ def main():
     net_amount = np.round(amount_usd - fee_amount - refund_amount - (dispute_fee*0.2), 2)
 
     # settlement/payout lags
-    settlement_lag = np.where(status=="COMPLETED", rng.integers(1, 72, size=args.events), None)
-    payout_lag = np.where(status=="COMPLETED", rng.integers(12, 120, size=args.events), None)
+    settlement_lag = np.where(status=="COMPLETED", rng.integers(1, 72, size=args.events), NONE)
+    payout_lag = np.where(status=="COMPLETED", rng.integers(12, 120, size=args.events), NONE)
     settlement_time = []
     payout_time = []
     for i in range(args.events):
@@ -252,7 +256,7 @@ def main():
     label_bad_outcome = ((is_denied) | (is_dispute) | (refund_amount > 0)).astype(int)
     label_anomaly = np.zeros(args.events, dtype=int)
     # simple anomaly: huge orders in last 14 days
-    recent_mask = event_time >= (now - timedelta(days=14))
+    recent_mask = event_time >= recent_cutoff
     label_anomaly[recent_mask & (amount_usd > np.percentile(amount_usd[recent_mask], 99.7))] = 1
     label_dispute_lost = (is_dispute & (rng.random(args.events) < np.where(m_risk=="HIGH", 0.45, np.where(m_risk=="MEDIUM", 0.30, 0.18)))).astype(int)
 
@@ -307,7 +311,7 @@ def main():
         "label_bad_outcome": label_bad_outcome,
         "label_anomaly": label_anomaly,
         "label_dispute_lost": label_dispute_lost,
-        "drift_regime_id": (event_time >= pd.Timestamp(drift_start)).astype(int)
+        "drift_regime_id": (event_time >= drift_start_ts).astype(int)
     })
 
     # write outputs

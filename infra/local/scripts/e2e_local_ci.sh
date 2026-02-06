@@ -95,21 +95,74 @@ wait_for_airflow_init() {
   return 1
 }
 
+
 wait_for_airflow_metadb() {
-  log_step "0.5a) Wait for Airflow DB connectivity + migrations"
-  for i in $(seq 1 120); do
-    if compose exec -T airflow-scheduler airflow db check >/dev/null 2>&1; then
+  log_step "0.5a) Ensure Airflow metadb is migrated + reachable"
+  local migrated_once=0
+
+  airflow_db_ready() {
+    # Prefer check-migrations if available; fallback to db check.
+    compose exec -T airflow-worker bash -lc '
+      set -e
+      airflow db check-migrations >/dev/null 2>&1 || airflow db check >/dev/null 2>&1
+    ' >/dev/null 2>&1
+  }
+
+  for i in $(seq 1 180); do
+    if airflow_db_ready; then
       echo "Airflow metadb ready"
       return 0
     fi
-    echo "waiting for Airflow metadb (airflow db check) retry ${i}/120"
+
+    if [[ "${migrated_once}" == "0" ]]; then
+      echo "Airflow metadb not initialized; running: airflow db migrate (one-off)"
+      if compose run --rm --no-deps airflow-worker airflow db migrate; then
+        migrated_once=1
+        # Bring core services back up so they pick up the migrated metadb.
+        compose up -d airflow-apiserver airflow-scheduler airflow-dag-processor airflow-triggerer airflow-worker || true
+      else
+        migrated_once=1
+        echo "WARNING: airflow db migrate failed; dumping key logs"
+        compose logs --no-color --tail 200 airflow-worker airflow-scheduler airflow-apiserver || true
+      fi
+    fi
+
+    echo "waiting for Airflow metadb (check-migrations/db check) retry ${i}/180"
     sleep 2
   done
 
-  echo "ERROR: Airflow metadb not ready"
-  compose logs --no-color --tail 200 airflow-scheduler || true
+  echo "ERROR: Airflow metadb not ready after waiting"
+  compose ps || true
+  compose logs --no-color --tail 200 airflow-worker airflow-scheduler airflow-apiserver airflow-dag-processor airflow-triggerer || true
   return 1
 }
+ensure_airflow_api_user() {
+  log_step "0.55) Ensure Airflow API user exists"
+  local u="${AIRFLOW_USER:-app}"
+  local pw="${AIRFLOW_PASSWORD:-app}"
+
+  # If the user already exists, no-op
+  if compose exec -T airflow-worker airflow users list 2>/dev/null \
+    | awk 'NR>2 {print $2}' \
+    | grep -qx "${u}"; then
+    echo "Airflow user exists: ${u}"
+    return 0
+  fi
+
+  # Create an Admin user for local/CI API auth
+  compose exec -T airflow-worker airflow users create \
+    --username "${u}" \
+    --firstname "${u}" \
+    --lastname "${u}" \
+    --role Admin \
+    --email "${u}@example.com" \
+    --password "${pw}" >/dev/null
+
+  echo "Airflow user ensured: ${u}"
+}
+
+
+
 
 wait_for_appdb() {
   log_step "0.5a) Wait for appdb connectivity"
@@ -171,10 +224,13 @@ wait_for_appdb_bootstrap() {
   return 1
 }
 
+
 force_dag_serialize() {
   log_step "0.5b) Force DAG serialization into the metadb"
-  compose exec -T airflow-scheduler airflow dags reserialize
+  # Use worker; scheduler may crash-loop if metadb isn't initialized yet.
+  compose exec -T airflow-worker airflow dags reserialize
 }
+
 
 wait_for_dag() {
   local dag_id="$1"
@@ -247,6 +303,7 @@ fix_bind_mount_ownership_in_docker_best_effort
 
 wait_for_airflow_init
 wait_for_airflow_metadb
+ensure_airflow_api_user
 wait_for_appdb
 wait_for_appdb_bootstrap
 

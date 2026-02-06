@@ -75,9 +75,9 @@ MID="$(awk '{print $2}' <<<"$ins_out")"
 echo "Inserted EVT_ID=$EVT_ID MID=$MID"
 echo
 
-TOKEN="$(curl -s -X POST "${ENDPOINT_URL}/auth/token" \
+TOKEN="$(curl -sS -f -X POST "${ENDPOINT_URL}/auth/token" \
   -H "Content-Type: application/json" \
-  -d '{"username":"airflow","password":"airflow"}' \
+  -d "{\"username\":\"${AIRFLOW_USER:-app}\",\"password\":\"${AIRFLOW_PASSWORD:-app}\"}" \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')"
 
 # MRP_PRECHECK_DAG_READY

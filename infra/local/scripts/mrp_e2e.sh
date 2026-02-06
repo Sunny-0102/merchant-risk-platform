@@ -72,9 +72,9 @@ echo "Inserted EVT_ID=$EVT_ID MID=$MID"
 echo
 
 echo "== 2) Trigger manual DagRun =="
-TOKEN="$(curl -s -X POST "${ENDPOINT_URL}/auth/token" \
+TOKEN="$(curl -sS -f -X POST "${ENDPOINT_URL}/auth/token" \
   -H "Content-Type: application/json" \
-  -d '{"username":"airflow","password":"airflow"}' \
+  -d "{\"username\":\"${AIRFLOW_USER:-app}\",\"password\":\"${AIRFLOW_PASSWORD:-app}\"}" \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')"
 
 # MRP_PRECHECK_DAG_READY
@@ -120,7 +120,7 @@ fi
 echo "RUN_ID=$RUN_ID"
 echo "LOGICAL_DATE=$LOGICAL_DATE"
 
-curl -s -X POST "${ENDPOINT_URL}/api/v2/dags/mrp_pipeline_dag/dagRuns" \
+curl -sS -f -X POST "${ENDPOINT_URL}/api/v2/dags/mrp_pipeline_dag/dagRuns" \
   -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Type: application/json" \
   -d "{\"dag_run_id\":\"${RUN_ID}\",\"logical_date\":\"${LOGICAL_DATE}\",\"conf\":{}}" >/dev/null

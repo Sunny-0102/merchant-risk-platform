@@ -1,6 +1,8 @@
 -- MRP bootstrap: schema + core tables + core functions + seed data
 -- Runs automatically on fresh Postgres init (docker-entrypoint-initdb.d)
 
+\set ON_ERROR_STOP on
+
 CREATE SCHEMA IF NOT EXISTS mrp;
 
 -- 1) Raw events landing zone
@@ -54,7 +56,7 @@ CREATE INDEX IF NOT EXISTS idx_fact_payment_events_mid_time
 CREATE INDEX IF NOT EXISTS idx_fact_payment_events_source_raw_id
   ON mrp.fact_payment_events (source, raw_id);
 
--- 5) Feature snapshots (15m + 1h windows)
+-- 5) Feature snapshots (15m + 1h windows) + risk score v1
 CREATE TABLE IF NOT EXISTS mrp.merchant_feature_snapshots (
   merchant_id       TEXT NOT NULL,
   snapshot_time_utc TIMESTAMPTZ NOT NULL,
@@ -63,8 +65,18 @@ CREATE TABLE IF NOT EXISTS mrp.merchant_feature_snapshots (
   gmv_usd_15m       NUMERIC(18,2) NOT NULL DEFAULT 0,
   txn_count_1h      INTEGER NOT NULL DEFAULT 0,
   gmv_usd_1h        NUMERIC(18,2) NOT NULL DEFAULT 0,
+
+  -- risk model v1 (simple heuristic score + band)
+  risk_score_v1     NUMERIC(5,2) NOT NULL DEFAULT 0,
+  risk_band_v1      TEXT NOT NULL DEFAULT 'low',
+
   PRIMARY KEY (merchant_id, snapshot_time_utc)
 );
+
+-- Upgrade-safe: if the table already existed (persistent docker volume), add new columns.
+ALTER TABLE mrp.merchant_feature_snapshots
+  ADD COLUMN IF NOT EXISTS risk_score_v1 NUMERIC(5,2) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS risk_band_v1  TEXT         NOT NULL DEFAULT 'low';
 
 CREATE INDEX IF NOT EXISTS idx_mfs_mid_computed_desc
   ON mrp.merchant_feature_snapshots (merchant_id, computed_at_utc DESC);
@@ -162,7 +174,7 @@ BEGIN
 END;
 $$;
 
--- 7) Snapshot recompute for a given 15-min bucket end time (UTC)
+-- 7) Snapshot recompute for a given 15-min bucket end time (UTC) + risk score v1
 CREATE OR REPLACE FUNCTION mrp.recompute_feature_snapshot(p_bucket_time_utc TIMESTAMPTZ)
 RETURNS INTEGER
 LANGUAGE plpgsql
@@ -170,7 +182,7 @@ AS $$
 DECLARE
   v_rows INT;
 BEGIN
-  WITH agg AS (
+  WITH base AS (
     SELECT
       merchant_id,
       p_bucket_time_utc AS snapshot_time_utc,
@@ -195,10 +207,41 @@ BEGIN
       AND ingested_at_utc >= p_bucket_time_utc - interval '1 hour'
     GROUP BY merchant_id
   ),
+  scored AS (
+    SELECT
+      b.*,
+      ROUND(s.score::numeric, 2)::numeric(5,2) AS risk_score_v1,
+      CASE
+        WHEN s.score >= 80 THEN 'high'
+        WHEN s.score >= 50 THEN 'medium'
+        ELSE 'low'
+      END AS risk_band_v1
+    FROM base b
+    CROSS JOIN LATERAL (
+      SELECT LEAST(
+        100.0,
+        -- velocity (counts)
+        12.0 * b.txn_count_15m
+        + 3.0 * b.txn_count_1h
+        -- value (log-scaled GMV) - clamp at 0 so ln() never sees negatives
+        + 15.0 * ln(1.0 + GREATEST(0.0, b.gmv_usd_15m::double precision))
+        + 5.0  * ln(1.0 + GREATEST(0.0, b.gmv_usd_1h::double precision))
+        -- burstiness (15m share of 1h, capped)
+        + 40.0 * LEAST(
+            1.0,
+            COALESCE(
+              b.txn_count_15m::double precision / NULLIF(b.txn_count_1h::double precision, 0.0),
+              0.0
+            )
+          )
+      ) AS score
+    ) s
+  ),
   up AS (
     INSERT INTO mrp.merchant_feature_snapshots (
       merchant_id, snapshot_time_utc, computed_at_utc,
-      txn_count_15m, gmv_usd_15m, txn_count_1h, gmv_usd_1h
+      txn_count_15m, gmv_usd_15m, txn_count_1h, gmv_usd_1h,
+      risk_score_v1, risk_band_v1
     )
     SELECT
       merchant_id,
@@ -207,15 +250,19 @@ BEGIN
       txn_count_15m,
       gmv_usd_15m,
       txn_count_1h,
-      gmv_usd_1h
-    FROM agg
+      gmv_usd_1h,
+      risk_score_v1,
+      risk_band_v1
+    FROM scored
     ON CONFLICT (merchant_id, snapshot_time_utc)
     DO UPDATE SET
       computed_at_utc = EXCLUDED.computed_at_utc,
       txn_count_15m   = EXCLUDED.txn_count_15m,
       gmv_usd_15m     = EXCLUDED.gmv_usd_15m,
       txn_count_1h    = EXCLUDED.txn_count_1h,
-      gmv_usd_1h      = EXCLUDED.gmv_usd_1h
+      gmv_usd_1h      = EXCLUDED.gmv_usd_1h,
+      risk_score_v1   = EXCLUDED.risk_score_v1,
+      risk_band_v1    = EXCLUDED.risk_band_v1
     RETURNING 1
   )
   SELECT COUNT(*) INTO v_rows FROM up;
