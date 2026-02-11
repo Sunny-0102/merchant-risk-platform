@@ -24,3 +24,10 @@ infra/local/**/logs/
 *.tfstate.*
 crash.log
 *.tfvars
+
+# Local dev artifacts (do not commit)
+.venv*/
+.venv-airflow*/
+.venv-airflow-linux*/
+.vscode/
+pyrightconfig.json
