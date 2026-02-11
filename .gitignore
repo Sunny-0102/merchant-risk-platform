@@ -17,3 +17,17 @@ __pycache__/
 
 infra/local/.env
 infra/local/**/logs/
+
+# OpenTofu/Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfvars
+
+# Local dev artifacts (do not commit)
+.venv*/
+.venv-airflow*/
+.venv-airflow-linux*/
+.vscode/
+pyrightconfig.json
