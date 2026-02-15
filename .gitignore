@@ -31,3 +31,7 @@ crash.log
 .venv-airflow-linux*/
 .vscode/
 pyrightconfig.json
+data/
+*.bak.*
+services/ingestion_api/*.bak.*
+mrp-admin_accessKeys.csv
