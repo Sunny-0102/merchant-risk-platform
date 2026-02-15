@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import asynccontextmanager
 from typing import Any, Dict
 
 import psycopg
@@ -11,11 +12,8 @@ from pydantic import BaseModel, Field
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://app:app@postgres:5432/appdb")
 
-app = FastAPI(title="Merchant Risk Platform - Ingestion API", version="0.1.0")
-
 
 def db_conn() -> psycopg.Connection[dict[str, Any]]:
-    # row_factory controls the row type returned by cursors (dict rows in our case)
     return psycopg.connect(
         DATABASE_URL,
         autocommit=True,
@@ -23,6 +21,71 @@ def db_conn() -> psycopg.Connection[dict[str, Any]]:
     )
 
 
+def ensure_schema() -> None:
+    ddl = [
+        "CREATE SCHEMA IF NOT EXISTS mrp;",
+        """
+        CREATE TABLE IF NOT EXISTS mrp.raw_realtime_events (
+          id BIGSERIAL PRIMARY KEY,
+          source TEXT NOT NULL,
+          payload JSONB NOT NULL,
+          received_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+        """,
+        "ALTER TABLE mrp.raw_realtime_events ADD COLUMN IF NOT EXISTS received_at TIMESTAMPTZ NOT NULL DEFAULT now();",
+        """
+        CREATE TABLE IF NOT EXISTS mrp.dim_merchant (
+          merchant_id TEXT PRIMARY KEY,
+          merchant_name TEXT,
+          onboarding_date DATE,
+          merchant_segment TEXT,
+          mcc TEXT,
+          industry_name TEXT,
+          risk_tier TEXT,
+          kyc_status TEXT,
+          account_status TEXT,
+          country TEXT,
+          state TEXT,
+          timezone TEXT,
+          fee_plan_id TEXT,
+          processor_fee_rate NUMERIC,
+          fixed_fee NUMERIC,
+          settlement_schedule TEXT,
+          payout_frequency TEXT,
+          payout_method TEXT,
+          reserve_rate NUMERIC,
+          avg_order_value_usd_est NUMERIC,
+          avg_daily_txn_est INT,
+          created_at_utc TIMESTAMPTZ DEFAULT now()
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS mrp.merchant_feature_snapshots (
+          id BIGSERIAL PRIMARY KEY,
+          merchant_id TEXT NOT NULL,
+          feature_time_utc TIMESTAMPTZ NOT NULL DEFAULT now(),
+          snapshot_time_utc TIMESTAMPTZ NOT NULL DEFAULT now(),
+          features JSONB NOT NULL DEFAULT '{}'::jsonb,
+          created_at_utc TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+        """,
+        "ALTER TABLE mrp.merchant_feature_snapshots ADD COLUMN IF NOT EXISTS snapshot_time_utc TIMESTAMPTZ NOT NULL DEFAULT now();",
+        "CREATE INDEX IF NOT EXISTS idx_mfs_mid_snapshot_time ON mrp.merchant_feature_snapshots (merchant_id, snapshot_time_utc DESC);",
+    ]
+
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            for stmt in ddl:
+                cur.execute(stmt)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    ensure_schema()
+    yield
+
+
+app = FastAPI(title="Merchant Risk Platform - Ingestion API", version="0.1.0", lifespan=lifespan)
 
 
 @app.get("/healthz")
@@ -37,11 +100,6 @@ class RawEventIn(BaseModel):
 
 @app.post("/ingest/raw")
 def ingest_raw(body: RawEventIn) -> Dict[str, Any]:
-    """
-    Minimal production-style ingestion:
-    - store the raw event in mrp.raw_realtime_events(payload jsonb)
-    - return the inserted row id + timestamp
-    """
     try:
         with db_conn() as conn:
             with conn.cursor() as cur:
@@ -63,9 +121,6 @@ def ingest_raw(body: RawEventIn) -> Dict[str, Any]:
 
 @app.get("/merchants/{merchant_id}")
 def get_merchant(merchant_id: str) -> Dict[str, Any]:
-    """
-    Read merchant profile (dimension) from mrp.dim_merchant.
-    """
     try:
         with db_conn() as conn:
             with conn.cursor() as cur:
@@ -85,9 +140,6 @@ def get_merchant(merchant_id: str) -> Dict[str, Any]:
 
 @app.get("/merchants/{merchant_id}/features/latest")
 def get_latest_features(merchant_id: str) -> Dict[str, Any]:
-    """
-    Read the latest computed feature snapshot for a merchant.
-    """
     try:
         with db_conn() as conn:
             with conn.cursor() as cur:
