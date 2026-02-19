@@ -1,6 +1,15 @@
 locals {
   # Pin to the exact image you pushed (immutable + safest for ECS)
-  ingestion_api_image = "${aws_ecr_repository.ingestion_api.repository_url}@sha256:20c8842ced00596581281a2101ba01fba83af5afcad12f538ebd169b30a51236"
+  ingestion_api_image = "${aws_ecr_repository.ingestion_api.repository_url}@sha256:9b114dbc61db872a2aa407fccfd9542a9c625d6048e105993b49544d6b3a9cd1"
+
+  # Postgres sidecar (dev only)
+  postgres_image    = "postgres:15"
+  postgres_user     = "app"
+  postgres_password = "app"
+  postgres_db       = "appdb"
+
+  # IMPORTANT: in awsvpc/Fargate, containers in the same task talk over localhost
+  ingestion_api_database_url = "postgresql://${local.postgres_user}:${local.postgres_password}@127.0.0.1:5432/${local.postgres_db}"
 }
 
 resource "aws_ecs_task_definition" "ingestion_api" {
@@ -15,12 +24,52 @@ resource "aws_ecs_task_definition" "ingestion_api" {
 
   container_definitions = jsonencode([
     {
+      name      = "postgres"
+      image     = local.postgres_image
+      essential = true
+
+      environment = [
+        { name = "POSTGRES_USER", value = local.postgres_user },
+        { name = "POSTGRES_PASSWORD", value = local.postgres_password },
+        { name = "POSTGRES_DB", value = local.postgres_db }
+      ]
+
+      portMappings = [
+        { containerPort = 5432, protocol = "tcp" }
+      ]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.ingestion_api.name
+          awslogs-region        = local.region
+          awslogs-stream-prefix = "ecs"
+        }
+      }
+
+      healthCheck = {
+        command     = ["CMD-SHELL", "pg_isready -U app -d appdb || exit 1"]
+        interval    = 10
+        timeout     = 5
+        retries     = 5
+        startPeriod = 10
+      }
+    },
+    {
       name      = "ingestion-api"
       image     = local.ingestion_api_image
       essential = true
 
+      dependsOn = [
+        { containerName = "postgres", condition = "HEALTHY" }
+      ]
+
+      environment = [
+        { name = "DATABASE_URL", value = local.ingestion_api_database_url }
+      ]
+
       portMappings = [
-        { containerPort = 8000, hostPort = 8000, protocol = "tcp" }
+        { containerPort = 8000, protocol = "tcp" }
       ]
 
       logConfiguration = {
@@ -64,12 +113,6 @@ resource "aws_ecs_service" "ingestion_api" {
   }
 
   health_check_grace_period_seconds = 30
-  lifecycle {
-    ignore_changes = [
-      task_definition,
-    ]
-  }
-
 
   depends_on = [aws_lb_listener.ingestion_api_http]
 }
