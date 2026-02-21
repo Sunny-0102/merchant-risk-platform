@@ -7,7 +7,7 @@ from typing import Any, Dict
 
 import psycopg
 from psycopg.rows import dict_row
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://app:app@postgres:5432/appdb")
@@ -181,6 +181,82 @@ def ingest_raw(body: RawEventIn) -> Dict[str, Any]:
                 return {"status": "ok", "id": row["id"], "received_at": row["received_at"].isoformat()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"db_insert_failed: {e}")
+
+@app.post("/ingest/dim_merchant/csv")
+async def ingest_dim_merchant_csv(request: Request) -> Dict[str, Any]:
+    """
+    Ingest dim_merchant as CSV (with header) via raw request body.
+    Usage (example):
+      curl -X POST http://<ALB>/ingest/dim_merchant/csv \
+        -H "Content-Type: text/csv" --data-binary @dim_merchant.csv
+    """
+    try:
+        data = await request.body()
+        if not data:
+            raise HTTPException(status_code=400, detail="empty_body")
+
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                # temp staging for idempotent upsert
+                cur.execute(
+                    """
+                    CREATE TEMP TABLE IF NOT EXISTS tmp_dim_merchant
+                    (LIKE mrp.dim_merchant INCLUDING DEFAULTS)
+                    ON COMMIT DROP;
+                    """
+                )
+                cur.execute("TRUNCATE tmp_dim_merchant;")
+
+                with cur.copy("COPY tmp_dim_merchant FROM STDIN WITH (FORMAT csv, HEADER true)") as cp:
+                    cp.write(data)
+
+                cur.execute("SELECT COUNT(*) AS n FROM tmp_dim_merchant;")
+                n = cur.fetchone()["n"]
+
+                cur.execute(
+                    """
+                    INSERT INTO mrp.dim_merchant (
+                      merchant_id, merchant_name, onboarding_date, merchant_segment, mcc, industry_name,
+                      risk_tier, kyc_status, account_status, country, state, timezone, fee_plan_id,
+                      processor_fee_rate, fixed_fee, settlement_schedule, payout_frequency, payout_method,
+                      reserve_rate, avg_order_value_usd_est, avg_daily_txn_est, created_at_utc
+                    )
+                    SELECT
+                      merchant_id, merchant_name, onboarding_date, merchant_segment, mcc, industry_name,
+                      risk_tier, kyc_status, account_status, country, state, timezone, fee_plan_id,
+                      processor_fee_rate, fixed_fee, settlement_schedule, payout_frequency, payout_method,
+                      reserve_rate, avg_order_value_usd_est, avg_daily_txn_est, created_at_utc
+                    FROM tmp_dim_merchant
+                    ON CONFLICT (merchant_id) DO UPDATE SET
+                      merchant_name = EXCLUDED.merchant_name,
+                      onboarding_date = EXCLUDED.onboarding_date,
+                      merchant_segment = EXCLUDED.merchant_segment,
+                      mcc = EXCLUDED.mcc,
+                      industry_name = EXCLUDED.industry_name,
+                      risk_tier = EXCLUDED.risk_tier,
+                      kyc_status = EXCLUDED.kyc_status,
+                      account_status = EXCLUDED.account_status,
+                      country = EXCLUDED.country,
+                      state = EXCLUDED.state,
+                      timezone = EXCLUDED.timezone,
+                      fee_plan_id = EXCLUDED.fee_plan_id,
+                      processor_fee_rate = EXCLUDED.processor_fee_rate,
+                      fixed_fee = EXCLUDED.fixed_fee,
+                      settlement_schedule = EXCLUDED.settlement_schedule,
+                      payout_frequency = EXCLUDED.payout_frequency,
+                      payout_method = EXCLUDED.payout_method,
+                      reserve_rate = EXCLUDED.reserve_rate,
+                      avg_order_value_usd_est = EXCLUDED.avg_order_value_usd_est,
+                      avg_daily_txn_est = EXCLUDED.avg_daily_txn_est,
+                      created_at_utc = EXCLUDED.created_at_utc;
+                    """
+                )
+
+        return {"status": "ok", "rows": n}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"dim_merchant_ingest_failed: {e}")
 
 
 @app.get("/merchants/{merchant_id}")
