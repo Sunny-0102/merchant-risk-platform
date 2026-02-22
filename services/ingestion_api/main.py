@@ -195,17 +195,19 @@ async def ingest_dim_merchant_csv(request: Request) -> Dict[str, Any]:
         if not data:
             raise HTTPException(status_code=400, detail="empty_body")
 
-        with db_conn() as conn:
-            with conn.cursor() as cur:
-                # temp staging for idempotent upsert
-                cur.execute(
-                    """
-                    CREATE TEMP TABLE IF NOT EXISTS tmp_dim_merchant
-                    (LIKE mrp.dim_merchant INCLUDING DEFAULTS)
-                    ON COMMIT DROP;
-                    """
-                )
-                cur.execute("TRUNCATE tmp_dim_merchant;")
+        with psycopg.connect(DATABASE_URL, autocommit=False, row_factory=dict_row) as conn:
+            with conn.transaction():
+                with conn.cursor() as cur:
+                    # temp staging for idempotent upsert
+                    cur.execute(
+                        """
+                        CREATE TEMP TABLE IF NOT EXISTS tmp_dim_merchant
+                        (LIKE mrp.dim_merchant INCLUDING DEFAULTS)
+                        ON COMMIT DROP;
+                        """
+                    )
+                    cur.execute("TRUNCATE tmp_dim_merchant;")
+
 
                 with cur.copy("COPY tmp_dim_merchant FROM STDIN WITH (FORMAT csv, HEADER true)") as cp:
                     cp.write(data)
