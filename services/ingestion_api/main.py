@@ -182,6 +182,7 @@ def ingest_raw(body: RawEventIn) -> Dict[str, Any]:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"db_insert_failed: {e}")
 
+
 @app.post("/ingest/dim_merchant/csv")
 async def ingest_dim_merchant_csv(request: Request) -> Dict[str, Any]:
     """
@@ -208,51 +209,50 @@ async def ingest_dim_merchant_csv(request: Request) -> Dict[str, Any]:
                     )
                     cur.execute("TRUNCATE tmp_dim_merchant;")
 
+                    with cur.copy("COPY tmp_dim_merchant FROM STDIN WITH (FORMAT csv, HEADER true)") as cp:
+                        cp.write(data)
 
-                with cur.copy("COPY tmp_dim_merchant FROM STDIN WITH (FORMAT csv, HEADER true)") as cp:
-                    cp.write(data)
+                    cur.execute("SELECT COUNT(*) AS n FROM tmp_dim_merchant;")
+                    n = cur.fetchone()["n"]
 
-                cur.execute("SELECT COUNT(*) AS n FROM tmp_dim_merchant;")
-                n = cur.fetchone()["n"]
-
-                cur.execute(
-                    """
-                    INSERT INTO mrp.dim_merchant (
-                      merchant_id, merchant_name, onboarding_date, merchant_segment, mcc, industry_name,
-                      risk_tier, kyc_status, account_status, country, state, timezone, fee_plan_id,
-                      processor_fee_rate, fixed_fee, settlement_schedule, payout_frequency, payout_method,
-                      reserve_rate, avg_order_value_usd_est, avg_daily_txn_est, created_at_utc
+                    cur.execute(
+                        """
+                        INSERT INTO mrp.dim_merchant (
+                          merchant_id, merchant_name, onboarding_date, merchant_segment, mcc, industry_name,
+                          risk_tier, kyc_status, account_status, country, state, timezone, fee_plan_id,
+                          processor_fee_rate, fixed_fee, settlement_schedule, payout_frequency, payout_method,
+                          reserve_rate, avg_order_value_usd_est, avg_daily_txn_est, created_at_utc
+                        )
+                        SELECT
+                          merchant_id, merchant_name, onboarding_date, merchant_segment, mcc, industry_name,
+                          risk_tier, kyc_status, account_status, country, state, timezone, fee_plan_id,
+                          processor_fee_rate, fixed_fee, settlement_schedule, payout_frequency, payout_method,
+                          reserve_rate, avg_order_value_usd_est, avg_daily_txn_est, created_at_utc
+                        FROM tmp_dim_merchant
+                        ON CONFLICT (merchant_id) DO UPDATE SET
+                          merchant_name = EXCLUDED.merchant_name,
+                          onboarding_date = EXCLUDED.onboarding_date,
+                          merchant_segment = EXCLUDED.merchant_segment,
+                          mcc = EXCLUDED.mcc,
+                          industry_name = EXCLUDED.industry_name,
+                          risk_tier = EXCLUDED.risk_tier,
+                          kyc_status = EXCLUDED.kyc_status,
+                          account_status = EXCLUDED.account_status,
+                          country = EXCLUDED.country,
+                          state = EXCLUDED.state,
+                          timezone = EXCLUDED.timezone,
+                          fee_plan_id = EXCLUDED.fee_plan_id,
+                          processor_fee_rate = EXCLUDED.processor_fee_rate,
+                          fixed_fee = EXCLUDED.fixed_fee,
+                          settlement_schedule = EXCLUDED.settlement_schedule,
+                          payout_frequency = EXCLUDED.payout_frequency,
+                          payout_method = EXCLUDED.payout_method,
+                          reserve_rate = EXCLUDED.reserve_rate,
+                          avg_order_value_usd_est = EXCLUDED.avg_order_value_usd_est,
+                          avg_daily_txn_est = EXCLUDED.avg_daily_txn_est,
+                          created_at_utc = EXCLUDED.created_at_utc;
+                        """
                     )
-                    SELECT
-                      merchant_id, merchant_name, onboarding_date, merchant_segment, mcc, industry_name,
-                      risk_tier, kyc_status, account_status, country, state, timezone, fee_plan_id,
-                      processor_fee_rate, fixed_fee, settlement_schedule, payout_frequency, payout_method,
-                      reserve_rate, avg_order_value_usd_est, avg_daily_txn_est, created_at_utc
-                    FROM tmp_dim_merchant
-                    ON CONFLICT (merchant_id) DO UPDATE SET
-                      merchant_name = EXCLUDED.merchant_name,
-                      onboarding_date = EXCLUDED.onboarding_date,
-                      merchant_segment = EXCLUDED.merchant_segment,
-                      mcc = EXCLUDED.mcc,
-                      industry_name = EXCLUDED.industry_name,
-                      risk_tier = EXCLUDED.risk_tier,
-                      kyc_status = EXCLUDED.kyc_status,
-                      account_status = EXCLUDED.account_status,
-                      country = EXCLUDED.country,
-                      state = EXCLUDED.state,
-                      timezone = EXCLUDED.timezone,
-                      fee_plan_id = EXCLUDED.fee_plan_id,
-                      processor_fee_rate = EXCLUDED.processor_fee_rate,
-                      fixed_fee = EXCLUDED.fixed_fee,
-                      settlement_schedule = EXCLUDED.settlement_schedule,
-                      payout_frequency = EXCLUDED.payout_frequency,
-                      payout_method = EXCLUDED.payout_method,
-                      reserve_rate = EXCLUDED.reserve_rate,
-                      avg_order_value_usd_est = EXCLUDED.avg_order_value_usd_est,
-                      avg_daily_txn_est = EXCLUDED.avg_daily_txn_est,
-                      created_at_utc = EXCLUDED.created_at_utc;
-                    """
-                )
 
         return {"status": "ok", "rows": n}
     except HTTPException:
