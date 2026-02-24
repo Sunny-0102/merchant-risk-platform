@@ -4,6 +4,8 @@ import json
 import os
 from contextlib import asynccontextmanager
 from typing import Any, Dict
+import boto3
+from botocore.exceptions import ClientError
 
 import psycopg
 from psycopg.rows import dict_row
@@ -161,6 +163,9 @@ class RawEventIn(BaseModel):
     source: str = Field(default="HTTP", description="Origin of the event (SYNTHETIC, WEBHOOK, etc.)")
     payload: Dict[str, Any] = Field(..., description="Raw event JSON object to store as jsonb")
 
+class S3CsvIn(BaseModel):
+    bucket: str = Field(..., description="S3 bucket name")
+    key: str = Field(..., description="S3 object key (path)")
 
 @app.post("/ingest/raw")
 def ingest_raw(body: RawEventIn) -> Dict[str, Any]:
@@ -260,6 +265,58 @@ async def ingest_dim_merchant_csv(request: Request) -> Dict[str, Any]:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"dim_merchant_ingest_failed: {e}")
 
+@app.post("/ingest/fact_payment_events/s3")
+def ingest_fact_payment_events_s3(body: S3CsvIn) -> Dict[str, Any]:
+    """
+    Ingest fact_payment_events from a CSV stored in S3 (header required).
+    Example:
+      curl -X POST http://<ALB>/ingest/fact_payment_events/s3 \
+        -H "Content-Type: application/json" \
+        -d '{"bucket":"mrp-raw-326148035022-us-east-1","key":"synthetic/fact_payment_events.csv"}'
+    """
+    try:
+        s3 = boto3.client("s3")
+        obj = s3.get_object(Bucket=body.bucket, Key=body.key)
+        data = obj["Body"].read()
+        if not data:
+            raise HTTPException(status_code=400, detail="empty_s3_object")
+
+        with psycopg.connect(DATABASE_URL, autocommit=False, row_factory=dict_row) as conn:
+            with conn.transaction():
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        CREATE TEMP TABLE IF NOT EXISTS tmp_fact_payment_events
+                        (LIKE mrp.fact_payment_events INCLUDING DEFAULTS)
+                        ON COMMIT DROP;
+                        """
+                    )
+                    cur.execute("TRUNCATE tmp_fact_payment_events;")
+
+                    with cur.copy("COPY tmp_fact_payment_events FROM STDIN WITH (FORMAT csv, HEADER true)") as cp:
+                        cp.write(data)
+
+                    cur.execute("SELECT COUNT(*) AS n FROM tmp_fact_payment_events;")
+                    staged = cur.fetchone()["n"]
+
+                    cur.execute(
+                        """
+                        INSERT INTO mrp.fact_payment_events
+                        SELECT * FROM tmp_fact_payment_events
+                        ON CONFLICT (event_id) DO NOTHING;
+                        """
+                    )
+
+                    cur.execute("SELECT COUNT(*) AS total FROM mrp.fact_payment_events;")
+                    total = cur.fetchone()["total"]
+
+        return {"status": "ok", "staged_rows": staged, "fact_total_rows": total}
+    except ClientError as e:
+        raise HTTPException(status_code=500, detail=f"s3_read_failed: {e}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"fact_ingest_failed: {e}")
 
 @app.get("/merchants/{merchant_id}")
 def get_merchant(merchant_id: str) -> Dict[str, Any]:
