@@ -55,9 +55,9 @@ resource "aws_iam_role_policy" "ingestion_api_task_s3_read_raw" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "ListRawBucketSyntheticPrefix"
-        Effect = "Allow"
-        Action = ["s3:ListBucket"]
+        Sid      = "ListRawBucketSyntheticPrefix"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
         Resource = aws_s3_bucket.raw.arn
         Condition = {
           StringLike = {
@@ -66,9 +66,9 @@ resource "aws_iam_role_policy" "ingestion_api_task_s3_read_raw" {
         }
       },
       {
-        Sid    = "ReadRawObjectsSyntheticPrefix"
-        Effect = "Allow"
-        Action = ["s3:GetObject", "s3:GetObjectVersion"]
+        Sid      = "ReadRawObjectsSyntheticPrefix"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:GetObjectVersion"]
         Resource = "${aws_s3_bucket.raw.arn}/synthetic/*"
       }
     ]

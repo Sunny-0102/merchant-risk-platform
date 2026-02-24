@@ -1,6 +1,6 @@
 locals {
   # Pin to the exact image you pushed (immutable + safest for ECS)
-  ingestion_api_image = "${aws_ecr_repository.ingestion_api.repository_url}@sha256:9b114dbc61db872a2aa407fccfd9542a9c625d6048e105993b49544d6b3a9cd1"
+  ingestion_api_image = "${aws_ecr_repository.ingestion_api.repository_url}@sha256:4f9febf3e77bc4db06572e9d14a52670d5a6cabee874f25a9268ac7b1d8976ff"
 
   # Postgres sidecar (dev only)
   postgres_image    = "postgres:15"
