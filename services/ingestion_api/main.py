@@ -293,7 +293,13 @@ def ingest_fact_payment_events_s3(body: S3CsvIn) -> Dict[str, Any]:
                     )
                     cur.execute("TRUNCATE tmp_fact_payment_events;")
 
-                    with cur.copy("COPY tmp_fact_payment_events FROM STDIN WITH (FORMAT csv, HEADER true)") as cp:
+                    with cur.copy(
+                        "COPY tmp_fact_payment_events ("
+                        "event_id,event_type,event_time_utc,merchant_id,order_id,status,amount_usd,"
+                        "payer_id_hash,merchant_country,merchant_mcc,source_system,ingested_at_utc,"
+                        "label_bad_outcome,drift_regime_id"
+                        ") FROM STDIN WITH (FORMAT csv, HEADER true)"
+                    ) as cp:
                         cp.write(data)
 
                     cur.execute("SELECT COUNT(*) AS n FROM tmp_fact_payment_events;")
@@ -301,8 +307,16 @@ def ingest_fact_payment_events_s3(body: S3CsvIn) -> Dict[str, Any]:
 
                     cur.execute(
                         """
-                        INSERT INTO mrp.fact_payment_events
-                        SELECT * FROM tmp_fact_payment_events
+                        INSERT INTO mrp.fact_payment_events (
+                        event_id,event_type,event_time_utc,merchant_id,order_id,status,amount_usd,
+                        payer_id_hash,merchant_country,merchant_mcc,source_system,ingested_at_utc,
+                        label_bad_outcome,drift_regime_id
+                        )
+                        SELECT
+                        event_id,event_type,event_time_utc,merchant_id,order_id,status,amount_usd,
+                        payer_id_hash,merchant_country,merchant_mcc,source_system,ingested_at_utc,
+                        label_bad_outcome,drift_regime_id
+                        FROM tmp_fact_payment_events
                         ON CONFLICT (event_id) DO NOTHING;
                         """
                     )
