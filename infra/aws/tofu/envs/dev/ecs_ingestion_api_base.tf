@@ -47,3 +47,30 @@ resource "aws_iam_role" "ingestion_api_task" {
     }]
   })
 }
+resource "aws_iam_role_policy" "ingestion_api_task_s3_read_raw" {
+  name = "mrp-ingestion-api-task-dev-s3-read-raw-${local.account_id}-${local.region}"
+  role = aws_iam_role.ingestion_api_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "ListRawBucketSyntheticPrefix"
+        Effect = "Allow"
+        Action = ["s3:ListBucket"]
+        Resource = aws_s3_bucket.raw.arn
+        Condition = {
+          StringLike = {
+            "s3:prefix" = ["synthetic/*"]
+          }
+        }
+      },
+      {
+        Sid    = "ReadRawObjectsSyntheticPrefix"
+        Effect = "Allow"
+        Action = ["s3:GetObject", "s3:GetObjectVersion"]
+        Resource = "${aws_s3_bucket.raw.arn}/synthetic/*"
+      }
+    ]
+  })
+}
