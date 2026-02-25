@@ -119,6 +119,7 @@ END $$;
           drift_regime_id INT
         );
         """,
+        "ALTER TABLE mrp.fact_payment_events ADD COLUMN IF NOT EXISTS event_time_utc TIMESTAMPTZ;",
         "CREATE INDEX IF NOT EXISTS idx_fact_merchant_time ON mrp.fact_payment_events (merchant_id, event_time_utc DESC);",
         """
         CREATE TABLE IF NOT EXISTS mrp.dim_merchant (
