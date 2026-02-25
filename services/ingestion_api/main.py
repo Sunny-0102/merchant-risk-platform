@@ -42,7 +42,7 @@ def ensure_schema() -> None:
           updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
         """,
-        "INSERT INTO mrp.raw_ingest_watermark (id, last_raw_id) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;",
+        "INSERT INTO mrp.raw_ingest_watermark (last_raw_id) SELECT 0 WHERE NOT EXISTS (SELECT 1 FROM mrp.raw_ingest_watermark);",
         """
         CREATE TABLE IF NOT EXISTS mrp.fact_payment_events (
           event_id TEXT PRIMARY KEY,
