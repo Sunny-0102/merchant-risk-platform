@@ -42,7 +42,28 @@ def ensure_schema() -> None:
           updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
         """,
-        "INSERT INTO mrp.raw_ingest_watermark (last_raw_id) SELECT 0 WHERE NOT EXISTS (SELECT 1 FROM mrp.raw_ingest_watermark);",
+        """
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'mrp'
+      AND table_name   = 'raw_ingest_watermark'
+      AND column_name  = 'source'
+  ) THEN
+    INSERT INTO mrp.raw_ingest_watermark (source, last_raw_id)
+    SELECT 'default', 0
+    WHERE NOT EXISTS (
+      SELECT 1 FROM mrp.raw_ingest_watermark WHERE source = 'default'
+    );
+  ELSE
+    INSERT INTO mrp.raw_ingest_watermark (last_raw_id)
+    SELECT 0
+    WHERE NOT EXISTS (SELECT 1 FROM mrp.raw_ingest_watermark);
+  END IF;
+END $$;
+""",
         """
         CREATE TABLE IF NOT EXISTS mrp.fact_payment_events (
           event_id TEXT PRIMARY KEY,
