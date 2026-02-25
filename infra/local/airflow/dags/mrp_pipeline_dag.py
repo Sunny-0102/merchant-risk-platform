@@ -94,9 +94,15 @@ with DAG(
         WITH params AS (
             SELECT
                 date_bin(
-                '15 minutes',
-                 '{{ data_interval_end | ts }}'::timestamptz- interval '1 microsecond',
-                '1970-01-01'::timestamptz
+                    '15 minutes',
+                    {% if data_interval_end is defined and data_interval_end %}
+                    '{{ data_interval_end | ts }}'::timestamptz
+                    {% elif logical_date is defined and logical_date %}
+                    '{{ logical_date | ts }}'::timestamptz
+                    {% else %}
+                    now()
+                    {% endif %} - interval '1 microsecond',
+                    '1970-01-01'::timestamptz
                 ) + interval '15 minutes' AS bucket_end
             ),
             buckets AS (

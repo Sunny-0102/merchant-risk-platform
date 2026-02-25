@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from airflow import DAG
 from airflow.providers.http.operators.http import HttpOperator
@@ -15,8 +15,11 @@ with DAG(
     HttpOperator(
         task_id="get_healthz",
         http_conn_id="mrp_ingestion_api",
-        endpoint="healthz",
+        endpoint="/healthz",
         method="GET",
         log_response=True,
         response_check=lambda r: r.status_code == 200,
+        retries=10,
+        retry_delay=timedelta(seconds=3),
+        extra_options={"timeout": 10},
     )

@@ -225,6 +225,29 @@ wait_for_appdb_bootstrap() {
 }
 
 
+wait_for_ingestion_api() {
+  log_step "0.5c) Wait for ingestion-api healthz"
+  for i in $(seq 1 120); do
+    cid="$(compose ps -q ingestion-api 2>/dev/null || true)"
+    if [[ -n "${cid}" ]]; then
+      status="$(docker inspect -f '{{.State.Status}}' "${cid}" 2>/dev/null || true)"
+      if [[ "${status}" == "running" ]]; then
+        if compose exec -T ingestion-api curl -fsS "http://localhost:8000/healthz" >/dev/null 2>&1; then
+          echo "ingestion-api ready"
+          return 0
+        fi
+      fi
+    fi
+    echo "waiting for ingestion-api (/healthz) retry ${i}/120"
+    sleep 2
+  done
+
+  echo "ERROR: ingestion-api not ready"
+  compose ps || true
+  compose logs --no-color --tail 200 ingestion-api || true
+  return 1
+}
+
 force_dag_serialize() {
   log_step "0.5b) Force DAG serialization into the metadb"
   # Use worker; scheduler may crash-loop if metadb isn't initialized yet.
@@ -306,6 +329,7 @@ wait_for_airflow_metadb
 ensure_airflow_api_user
 wait_for_appdb
 wait_for_appdb_bootstrap
+wait_for_ingestion_api
 
 force_dag_serialize
 
