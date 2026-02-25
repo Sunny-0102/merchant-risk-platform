@@ -35,3 +35,7 @@ data/
 *.bak.*
 services/ingestion_api/*.bak.*
 mrp-admin_accessKeys.csv
+
+# OpenTofu/Terraform plans
+*.tfplan
+tfplan
