@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS mrp.dim_merchant (
 CREATE TABLE IF NOT EXISTS mrp.fact_payment_events (
   event_id        TEXT PRIMARY KEY,
   event_type      TEXT,
+  event_time_utc TIMESTAMPTZ NOT NULL,
   ingested_at_utc TIMESTAMPTZ NOT NULL,
   merchant_id     TEXT NOT NULL,
   order_id        TEXT,
@@ -50,8 +51,21 @@ CREATE TABLE IF NOT EXISTS mrp.fact_payment_events (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+
+-- Upgrade-safe: if the table already existed (persistent docker volume), add event_time_utc.
+ALTER TABLE mrp.fact_payment_events
+  ADD COLUMN IF NOT EXISTS event_time_utc TIMESTAMPTZ;
+
+-- Backfill for old rows.
+UPDATE mrp.fact_payment_events
+   SET event_time_utc = ingested_at_utc
+ WHERE event_time_utc IS NULL;
+
 CREATE INDEX IF NOT EXISTS idx_fact_payment_events_mid_time
   ON mrp.fact_payment_events (merchant_id, ingested_at_utc);
+
+CREATE INDEX IF NOT EXISTS idx_fact_payment_events_mid_event_time
+  ON mrp.fact_payment_events (merchant_id, event_time_utc);
 
 CREATE INDEX IF NOT EXISTS idx_fact_payment_events_source_raw_id
   ON mrp.fact_payment_events (source, raw_id);
@@ -125,15 +139,18 @@ BEGIN
   ),
   ins_fact AS (
     INSERT INTO mrp.fact_payment_events (
-      event_id, event_type, ingested_at_utc, merchant_id, order_id,
+      event_id, event_type, event_time_utc, ingested_at_utc, merchant_id, order_id,
       amount_usd, status, raw_id, source, received_at, payload
     )
     SELECT
       COALESCE(NULLIF(payload->>'event_id',''), 'raw_'||id::text) AS event_id,
       payload->>'event_type' AS event_type,
       COALESCE(
-        NULLIF(payload->>'ingested_at_utc','')::timestamptz,
         NULLIF(payload->>'event_time_utc','')::timestamptz,
+        received_at
+      ) AS event_time_utc,
+      COALESCE(
+        NULLIF(payload->>'ingested_at_utc','')::timestamptz,
         received_at
       ) AS ingested_at_utc,
       payload->>'merchant_id' AS merchant_id,
@@ -187,24 +204,25 @@ BEGIN
       merchant_id,
       p_bucket_time_utc AS snapshot_time_utc,
       COUNT(*) FILTER (
-        WHERE ingested_at_utc >= p_bucket_time_utc - interval '15 minutes'
-          AND ingested_at_utc <  p_bucket_time_utc
+        WHERE event_time_utc >= p_bucket_time_utc - interval '15 minutes'
+          AND event_time_utc <  p_bucket_time_utc
       ) AS txn_count_15m,
       COALESCE(SUM(amount_usd) FILTER (
-        WHERE ingested_at_utc >= p_bucket_time_utc - interval '15 minutes'
-          AND ingested_at_utc <  p_bucket_time_utc
+        WHERE event_time_utc >= p_bucket_time_utc - interval '15 minutes'
+          AND event_time_utc <  p_bucket_time_utc
       ), 0) AS gmv_usd_15m,
       COUNT(*) FILTER (
-        WHERE ingested_at_utc >= p_bucket_time_utc - interval '1 hour'
-          AND ingested_at_utc <  p_bucket_time_utc
+        WHERE event_time_utc >= p_bucket_time_utc - interval '1 hour'
+          AND event_time_utc <  p_bucket_time_utc
       ) AS txn_count_1h,
       COALESCE(SUM(amount_usd) FILTER (
-        WHERE ingested_at_utc >= p_bucket_time_utc - interval '1 hour'
-          AND ingested_at_utc <  p_bucket_time_utc
+        WHERE event_time_utc >= p_bucket_time_utc - interval '1 hour'
+          AND event_time_utc <  p_bucket_time_utc
       ), 0) AS gmv_usd_1h
     FROM mrp.fact_payment_events
     WHERE ingested_at_utc <  p_bucket_time_utc
-      AND ingested_at_utc >= p_bucket_time_utc - interval '1 hour'
+      AND event_time_utc <  p_bucket_time_utc
+      AND event_time_utc >= p_bucket_time_utc - interval '1 hour'
     GROUP BY merchant_id
   ),
   scored AS (
