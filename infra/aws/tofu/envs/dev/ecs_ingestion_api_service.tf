@@ -1,7 +1,7 @@
 locals {
-  # Pin to the exact image you pushed (immutable + safest for ECS)
-  ingestion_api_image = "${aws_ecr_repository.ingestion_api.repository_url}@sha256:4f9febf3e77bc4db06572e9d14a52670d5a6cabee874f25a9268ac7b1d8976ff"
-
+  # Deploy by immutable tag, but resolve to a digest for deterministic ECS task defs
+  ingestion_api_tag   = "git-312e4b3-amd64"
+  ingestion_api_image = "${aws_ecr_repository.ingestion_api.repository_url}@${data.aws_ecr_image.ingestion_api.image_digest}"
   # Postgres sidecar (dev only)
   postgres_image    = "postgres:15"
   postgres_user     = "app"
@@ -10,6 +10,11 @@ locals {
 
   # IMPORTANT: in awsvpc/Fargate, containers in the same task talk over localhost
   ingestion_api_database_url = "postgresql://${local.postgres_user}:${local.postgres_password}@127.0.0.1:5432/${local.postgres_db}"
+}
+
+data "aws_ecr_image" "ingestion_api" {
+  repository_name = aws_ecr_repository.ingestion_api.name
+  image_tag       = local.ingestion_api_tag
 }
 
 resource "aws_ecs_task_definition" "ingestion_api" {
