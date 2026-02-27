@@ -227,10 +227,24 @@ wait_for_appdb_bootstrap() {
 
 wait_for_ingestion_api() {
   log_step "0.5c) Wait for ingestion-api healthz"
+  local restarted=0
   for i in $(seq 1 120); do
-    cid="$(compose ps -q ingestion-api 2>/dev/null || true)"
+    cid="$(compose ps -a -q ingestion-api 2>/dev/null || true)"
+    if [[ -z "${cid}" ]]; then
+      echo "ingestion-api container not found; starting..."
+      compose up -d ingestion-api || true
+      sleep 2
+      continue
+    fi
     if [[ -n "${cid}" ]]; then
       status="$(docker inspect -f '{{.State.Status}}' "${cid}" 2>/dev/null || true)"
+      if [[ "${status}" == "exited" && "${restarted}" == "0" ]]; then
+        echo "ingestion-api exited; restarting once..."
+        compose restart ingestion-api || true
+        restarted=1
+        sleep 2
+        continue
+      fi
       if [[ "${status}" == "running" ]]; then
         if compose exec -T ingestion-api curl -fsS "http://localhost:8000/healthz" >/dev/null 2>&1; then
           echo "ingestion-api ready"
@@ -326,6 +340,10 @@ fix_bind_mount_ownership_in_docker_best_effort
 
 wait_for_airflow_init
 wait_for_airflow_metadb
+# Ensure Airflow metadb is initialized (fresh volumes can skip airflow-init detection)
+compose exec -T airflow-worker airflow db migrate
+# Bring back core Airflow services if they exited before migrate
+compose up -d airflow-scheduler airflow-dag-processor airflow-apiserver airflow-triggerer
 ensure_airflow_api_user
 wait_for_appdb
 wait_for_appdb_bootstrap
