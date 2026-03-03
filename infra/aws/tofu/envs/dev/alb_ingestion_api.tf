@@ -3,20 +3,24 @@ locals {
   ingestion_api_tg_name  = "mrp-i-dev-${local.account_id}"
 }
 
-# ALB Security Group: allow inbound HTTP from the internet
+
+data "aws_ec2_managed_prefix_list" "cloudfront_origin_facing" {
+  name = "com.amazonaws.global.cloudfront.origin-facing"
+}
+
+# ALB Security Group: allow inbound HTTP ONLY from CloudFront (origin-facing)
+
 resource "aws_security_group" "ingestion_api_alb" {
   name        = "mrp-ingestion-alb-dev-${local.account_id}-${local.region}"
   description = "ALB SG for ingestion-api (dev)"
   vpc_id      = aws_vpc.dev.id
-
   ingress {
-    description = "HTTP from anywhere (dev)"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    description     = "HTTP from CloudFront origin-facing only"
+    from_port       = 80
+    to_port         = 80
+    protocol        = "tcp"
+    prefix_list_ids = [data.aws_ec2_managed_prefix_list.cloudfront_origin_facing.id]
   }
-
   egress {
     description = "All outbound"
     from_port   = 0
