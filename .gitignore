@@ -39,3 +39,6 @@ mrp-admin_accessKeys.csv
 # OpenTofu/Terraform plans
 *.tfplan
 tfplan
+
+# local snapshots (do not commit)
+infra/.local/
