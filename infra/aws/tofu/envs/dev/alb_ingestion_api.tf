@@ -114,3 +114,24 @@ resource "aws_lb_listener" "ingestion_api_http" {
     target_group_arn = aws_lb_target_group.ingestion_api.arn
   }
 }
+# Block non-standard HTTP methods at the ALB edge.
+# CloudFront must allow all methods to support POST, so we block the unused ones here.
+resource "aws_lb_listener_rule" "ingestion_api_block_nonstandard_methods" {
+  listener_arn = aws_lb_listener.ingestion_api_http.arn
+  priority     = 10
+
+  action {
+    type = "fixed-response"
+    fixed_response {
+      content_type = "text/plain"
+      status_code  = "405"
+      message_body = "Method Not Allowed"
+    }
+  }
+
+  condition {
+    http_request_method {
+      values = ["DELETE", "PATCH", "PUT"]
+    }
+  }
+}
