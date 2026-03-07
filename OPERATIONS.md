@@ -8,7 +8,7 @@ Dev edge posture: **CloudFront → ALB → ECS (Fargate)** with **NO direct inte
 ```bash
 source scripts/aws_env.sh
 ```
-2) Verify edge posture (CloudFront-only ALB)
+### 2) Verify edge posture (CloudFront-only ALB)
 ```bash
 source scripts/aws_env.sh
 CF_DOMAIN="$(cd infra/aws/tofu/envs/dev && tofu output -raw ingestion_api_cloudfront_domain)" \
@@ -89,4 +89,4 @@ changes must go through a PR
 required status checks must pass
 
 
----
+
