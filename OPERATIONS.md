@@ -20,7 +20,7 @@ Direct http://<ALB_DNS>/healthz times out / is blocked
 
 https://<CloudFrontDomain>/healthz returns HTTP 200
 
-3) Discover endpoints via OpenTofu outputs (dev)
+### 3) Discover endpoints via OpenTofu outputs (dev)
 ```bash
 cd infra/aws/tofu/envs/dev
 source ../../../../../scripts/aws_env.sh
@@ -40,20 +40,20 @@ ingestion_api_waf_web_acl_id
 
 ingestion_api_waf_web_acl_name
 
-4) ECS Exec into ingestion API task
+### 4) ECS Exec into ingestion API task
 ```bash
 source scripts/aws_env.sh
 ./scripts/ecs_exec_ingestion_api.sh "/bin/sh"
 ```
-IaC (OpenTofu) — dev workflow
+### IaC (OpenTofu) — dev workflow
 ```bash
 cd infra/aws/tofu/envs/dev
 source ../../../../../scripts/aws_env.sh
 tofu init
 tofu plan
 ```
-WAF verification (dev)
-Confirm WAF is attached to the CloudFront distribution
+### WAF verification (dev)
+### Confirm WAF is attached to the CloudFront distribution
 ```bash
 source scripts/aws_env.sh
 CF_DOMAIN="$(cd infra/aws/tofu/envs/dev && tofu output -raw ingestion_api_cloudfront_domain)"
@@ -61,7 +61,7 @@ DIST_ID="$(aws cloudfront list-distributions --query "DistributionList.Items[?Do
 aws cloudfront get-distribution --id "$DIST_ID" \
   --query 'Distribution.DistributionConfig.WebACLId' --output text
 ```
-Confirm WAF rules are in COUNT mode
+### Confirm WAF rules are in COUNT mode
 ```bash
 source scripts/aws_env.sh
 aws wafv2 get-web-acl \
@@ -72,6 +72,36 @@ aws wafv2 get-web-acl \
   --query 'WebACL.Rules[].{Priority:Priority,Name:Name,Mode:(Action.Count!=null && `COUNT`) || (OverrideAction.Count!=null && `COUNT`) || `OTHER`}' \
   --output table
 ```
+
+
+## Method allowlist (dev)
+
+CloudFront AllowedMethods must remain broad (AWS constraint), so we enforce the effective allowlist at the ALB.
+
+- Allowed: GET, HEAD, OPTIONS, POST
+- Blocked at ALB: PUT, PATCH, DELETE (returns HTTP 405)
+
+### Verify method block (via CloudFront)
+```bash
+source scripts/aws_env.sh
+CF_DOMAIN="$(cd infra/aws/tofu/envs/dev && tofu output -raw ingestion_api_cloudfront_domain)"
+
+curl -sS -o /dev/null -w "GET /healthz -> HTTP %{http_code}\n" "https://${CF_DOMAIN}/healthz"
+curl -sS -o /dev/null -w "PUT /healthz -> HTTP %{http_code}\n" -X PUT "https://${CF_DOMAIN}/healthz"
+```
+Expected:
+
+- GET /healthz -> 200
+
+- PUT /healthz -> 405
+
+### Verify rule exists in OpenTofu (dev)
+```bash
+cd infra/aws/tofu/envs/dev
+source ../../../../../scripts/aws_env.sh
+tofu state show aws_lb_listener_rule.ingestion_api_block_nonstandard_methods | sed -n "1,200p"
+```
+
 Local snapshots (NOT committed)
 
 infra/.local/ is ignored via .gitignore. Store AWS snapshots there for debugging, e.g.:
@@ -87,6 +117,4 @@ main is protected:
 changes must go through a PR
 
 required status checks must pass
-
-
 
