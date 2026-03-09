@@ -76,6 +76,22 @@ def test_airflow_dag_contains_training_dataset_export_task():
     assert 'task_id="export_risk_training_dataset"' in txt
     assert "mrp.export_risk_training_dataset(" in txt
 
+
+def test_airflow_compose_mounts_training_export_directory():
+    compose_path = _first_existing("infra/local/docker-compose.airflow.yml")
+    txt = compose_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert "./../../data:/workspace/data" in txt
+
+
+def test_e2e_local_ci_prepares_training_export_directory():
+    script_path = _first_existing("infra/local/scripts/e2e_local_ci.sh")
+    txt = script_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert 'mkdir -p "${REPO_ROOT}/data/training_exports"' in txt
+    assert 'mkdir -p /workspace/data/training_exports' in txt
+    assert 'chown -R ${AIRFLOW_UID}:0 /workspace/data || true' in txt
+
 def test_ci_scripts_do_not_reference_missing_24h_columns_or_invalid_docker_exec_T():
     # Pick whichever script location exists in this repo layout
     dedup = _first_existing("scripts/mrp_dedup.sh", "infra/local/scripts/mrp_dedup.sh")

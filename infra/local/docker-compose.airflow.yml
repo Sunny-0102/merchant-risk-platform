@@ -26,6 +26,7 @@ services:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
       - ./airflow/plugins:/opt/airflow/plugins
+      - ./../../data:/workspace/data
     entrypoint: /bin/bash
     command: -lc "airflow db migrate && airflow users create --username airflow --password airflow --firstname Airflow --lastname Admin --role Admin --email airflow@example.com || true"
 
@@ -52,6 +53,7 @@ services:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
       - ./airflow/plugins:/opt/airflow/plugins
+      - ./../../data:/workspace/data
     ports:
       - "8080:8080"
     command: api-server
@@ -79,6 +81,7 @@ services:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
       - ./airflow/plugins:/opt/airflow/plugins
+      - ./../../data:/workspace/data
     command: scheduler
 
   airflow-dag-processor:
@@ -104,6 +107,7 @@ services:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
       - ./airflow/plugins:/opt/airflow/plugins
+      - ./../../data:/workspace/data
     command: dag-processor
 
   airflow-triggerer:
@@ -129,6 +133,7 @@ services:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
       - ./airflow/plugins:/opt/airflow/plugins
+      - ./../../data:/workspace/data
     command: triggerer
 
   airflow-worker:
@@ -154,4 +159,5 @@ services:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
       - ./airflow/plugins:/opt/airflow/plugins
+      - ./../../data:/workspace/data
     command: celery worker

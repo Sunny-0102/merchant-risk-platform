@@ -1,7 +1,10 @@
+import csv
+from pathlib import Path
+
 import pendulum
 
 from airflow import DAG
-from airflow.providers.standard.operators.python import ShortCircuitOperator
+from airflow.providers.standard.operators.python import PythonOperator, ShortCircuitOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 
@@ -56,6 +59,60 @@ def has_new_raw(**context) -> bool:
     ti.xcom_push(key="source", value=str(source))
 
     return bool(has_new)
+
+EXPORT_ROOT = Path("/workspace/data/training_exports")
+TRAINING_EXPORT_FILENAME = "risk_training_dataset_latest.csv"
+
+def export_training_dataset_csv(**context) -> str:
+    hook = PostgresHook(postgres_conn_id="mrp_postgres")
+
+    interval_end_utc = (
+        context.get("data_interval_end")
+        or context.get("logical_date")
+        or pendulum.now("UTC")
+    )
+    snapshot_start_utc = interval_end_utc - pendulum.duration(days=8)
+    snapshot_end_utc = interval_end_utc - pendulum.duration(hours=24)
+
+    rows = hook.get_records(
+        """
+        SELECT *
+        FROM mrp.export_risk_training_dataset(
+          %(snapshot_start_utc)s::timestamptz,
+          %(snapshot_end_utc)s::timestamptz
+        )
+        ORDER BY snapshot_time_utc, merchant_id
+        """,
+        parameters={
+            "snapshot_start_utc": snapshot_start_utc.to_iso8601_string(),
+            "snapshot_end_utc": snapshot_end_utc.to_iso8601_string(),
+        },
+    )
+
+    EXPORT_ROOT.mkdir(parents=True, exist_ok=True)
+    out_path = EXPORT_ROOT / TRAINING_EXPORT_FILENAME
+
+    fieldnames = [
+        "merchant_id",
+        "snapshot_time_utc",
+        "computed_at_utc",
+        "txn_count_15m",
+        "gmv_usd_15m",
+        "txn_count_1h",
+        "gmv_usd_1h",
+        "risk_score_v1",
+        "risk_band_v1",
+        "label_bad_outcome_24h",
+        "label_anomaly_24h",
+        "label_dispute_lost_24h",
+    ]
+
+    with out_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(fieldnames)
+        writer.writerows(rows)
+
+    return str(out_path)
 
 
 with DAG(
@@ -119,27 +176,9 @@ with DAG(
         show_return_value_in_logs=True
     )
 
-    export_risk_training_dataset = SQLExecuteQueryOperator(
+    export_risk_training_dataset = PythonOperator(
         task_id="export_risk_training_dataset",
-        conn_id="mrp_postgres",
-        sql="""
-        WITH bounds AS (
-            SELECT
-                {% if data_interval_end is defined and data_interval_end %}
-                '{{ data_interval_end | ts }}'::timestamptz
-                {% elif logical_date is defined and logical_date %}
-                '{{ logical_date | ts }}'::timestamptz
-                {% else %}
-                now()
-                {% endif %} AS interval_end_utc
-        )
-        SELECT COUNT(*)::bigint AS exported_rows
-        FROM mrp.export_risk_training_dataset(
-            (SELECT interval_end_utc - interval '8 days' FROM bounds),
-            (SELECT interval_end_utc - interval '24 hours' FROM bounds)
-        );
-        """,
-        show_return_value_in_logs=True,
+        python_callable=export_training_dataset_csv,
     )
 
     gate_new_data >> process_raw >> recompute_snapshot >> export_risk_training_dataset
