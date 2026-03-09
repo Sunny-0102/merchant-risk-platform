@@ -43,9 +43,11 @@ ensure_bind_mount_dirs() {
   # So: create dirs, but do NOT hard-fail on permission twiddling.
   log_step "0) Ensure bind-mount directories exist on host"
   mkdir -p "${LOCAL_DIR}/airflow/dags" "${LOCAL_DIR}/airflow/logs" "${LOCAL_DIR}/airflow/plugins"
+  mkdir -p "${REPO_ROOT}/data/training_exports"
 
   # Helpful debug (never fail CI because of ls/stat weirdness)
   ls -ld "${LOCAL_DIR}/airflow" "${LOCAL_DIR}/airflow/dags" "${LOCAL_DIR}/airflow/logs" "${LOCAL_DIR}/airflow/plugins" || true
+  ls -ld "${REPO_ROOT}/data" "${REPO_ROOT}/data/training_exports" || true
 }
 
 fix_bind_mount_ownership_in_docker_best_effort() {
@@ -63,7 +65,9 @@ fix_bind_mount_ownership_in_docker_best_effort() {
   compose run --rm --no-deps --user 0:0 airflow-scheduler bash -lc "
     set -e
     mkdir -p /opt/airflow/dags /opt/airflow/logs /opt/airflow/plugins
+    mkdir -p /workspace/data/training_exports
     chown -R ${AIRFLOW_UID}:0 /opt/airflow/dags /opt/airflow/logs /opt/airflow/plugins || true
+    chown -R ${AIRFLOW_UID}:0 /workspace/data || true
   " || true
 }
 
