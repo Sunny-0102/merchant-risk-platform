@@ -33,14 +33,17 @@ CREATE TABLE IF NOT EXISTS mrp.dim_merchant (
 
 -- 4) Fact table derived from raw events (minimal)
 CREATE TABLE IF NOT EXISTS mrp.fact_payment_events (
-  event_id        TEXT PRIMARY KEY,
-  event_type      TEXT,
-  event_time_utc TIMESTAMPTZ NOT NULL,
-  ingested_at_utc TIMESTAMPTZ NOT NULL,
-  merchant_id     TEXT NOT NULL,
-  order_id        TEXT,
-  amount_usd      NUMERIC(18,2),
-  status          TEXT,
+  event_id            TEXT PRIMARY KEY,
+  event_type          TEXT,
+  event_time_utc      TIMESTAMPTZ NOT NULL,
+  ingested_at_utc     TIMESTAMPTZ NOT NULL,
+  merchant_id         TEXT NOT NULL,
+  order_id            TEXT,
+  amount_usd          NUMERIC(18,2),
+  status              TEXT,
+  label_bad_outcome   INTEGER,
+  label_anomaly       INTEGER,
+  label_dispute_lost  INTEGER,
 
   -- lineage
   raw_id      BIGINT NOT NULL,
@@ -54,7 +57,10 @@ CREATE TABLE IF NOT EXISTS mrp.fact_payment_events (
 
 -- Upgrade-safe: if the table already existed (persistent docker volume), add event_time_utc.
 ALTER TABLE mrp.fact_payment_events
-  ADD COLUMN IF NOT EXISTS event_time_utc TIMESTAMPTZ;
+  ADD COLUMN IF NOT EXISTS event_time_utc TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS label_bad_outcome INTEGER,
+  ADD COLUMN IF NOT EXISTS label_anomaly INTEGER,
+  ADD COLUMN IF NOT EXISTS label_dispute_lost INTEGER;
 
 -- Backfill for old rows.
 UPDATE mrp.fact_payment_events
