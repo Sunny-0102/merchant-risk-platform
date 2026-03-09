@@ -46,6 +46,28 @@ def test_ingestion_api_snapshot_schema_matches_structured_bootstrap_shape():
     assert "features JSONB" not in txt
     assert "feature_time_utc" not in txt
 
+
+def test_bootstrap_contains_training_dataset_export_function():
+    sql_path = _first_existing("infra/local/postgres-init/02_mrp_bootstrap.sql")
+    sql = sql_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert "CREATE OR REPLACE FUNCTION mrp.export_risk_training_dataset" in sql
+    for token in (
+        "snapshot_time_utc",
+        "txn_count_15m",
+        "gmv_usd_15m",
+        "txn_count_1h",
+        "gmv_usd_1h",
+        "risk_score_v1",
+        "risk_band_v1",
+        "label_bad_outcome_24h",
+        "label_anomaly_24h",
+        "label_dispute_lost_24h",
+        "snapshot_time_utc + interval '24 hours'",
+        "<= now()",
+    ):
+        assert token in sql, f"Missing training export token in bootstrap SQL: {token}"
+
 def test_ci_scripts_do_not_reference_missing_24h_columns_or_invalid_docker_exec_T():
     # Pick whichever script location exists in this repo layout
     dedup = _first_existing("scripts/mrp_dedup.sh", "infra/local/scripts/mrp_dedup.sh")
