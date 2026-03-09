@@ -92,6 +92,15 @@ def test_e2e_local_ci_prepares_training_export_directory():
     assert 'mkdir -p /workspace/data/training_exports' in txt
     assert 'chown -R ${AIRFLOW_UID}:0 /workspace/data || true' in txt
 
+
+def test_local_risk_model_training_script_contract_exists():
+    script_path = _first_existing("scripts/train_local_risk_model.py")
+    txt = script_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert "risk_training_dataset_latest.csv" in txt
+    assert "data/models" in txt
+    assert "risk_model_latest.pkl" in txt
+
 def test_ci_scripts_do_not_reference_missing_24h_columns_or_invalid_docker_exec_T():
     # Pick whichever script location exists in this repo layout
     dedup = _first_existing("scripts/mrp_dedup.sh", "infra/local/scripts/mrp_dedup.sh")
