@@ -68,6 +68,14 @@ def test_bootstrap_contains_training_dataset_export_function():
     ):
         assert token in sql, f"Missing training export token in bootstrap SQL: {token}"
 
+
+def test_airflow_dag_contains_training_dataset_export_task():
+    dag_path = _first_existing("infra/local/airflow/dags/mrp_pipeline_dag.py")
+    txt = dag_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert 'task_id="export_risk_training_dataset"' in txt
+    assert "mrp.export_risk_training_dataset(" in txt
+
 def test_ci_scripts_do_not_reference_missing_24h_columns_or_invalid_docker_exec_T():
     # Pick whichever script location exists in this repo layout
     dedup = _first_existing("scripts/mrp_dedup.sh", "infra/local/scripts/mrp_dedup.sh")

@@ -119,6 +119,27 @@ with DAG(
         show_return_value_in_logs=True
     )
 
+    export_risk_training_dataset = SQLExecuteQueryOperator(
+        task_id="export_risk_training_dataset",
+        conn_id="mrp_postgres",
+        sql="""
+        WITH bounds AS (
+            SELECT
+                {% if data_interval_end is defined and data_interval_end %}
+                '{{ data_interval_end | ts }}'::timestamptz
+                {% elif logical_date is defined and logical_date %}
+                '{{ logical_date | ts }}'::timestamptz
+                {% else %}
+                now()
+                {% endif %} AS interval_end_utc
+        )
+        SELECT COUNT(*)::bigint AS exported_rows
+        FROM mrp.export_risk_training_dataset(
+            (SELECT interval_end_utc - interval '8 days' FROM bounds),
+            (SELECT interval_end_utc - interval '24 hours' FROM bounds)
+        );
+        """,
+        show_return_value_in_logs=True,
+    )
 
-
-    gate_new_data >> process_raw >> recompute_snapshot
+    gate_new_data >> process_raw >> recompute_snapshot >> export_risk_training_dataset
