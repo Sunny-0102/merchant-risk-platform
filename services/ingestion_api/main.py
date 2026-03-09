@@ -149,16 +149,22 @@ END $$;
         """,
         """
         CREATE TABLE IF NOT EXISTS mrp.merchant_feature_snapshots (
-          id BIGSERIAL PRIMARY KEY,
-          merchant_id TEXT NOT NULL,
-          feature_time_utc TIMESTAMPTZ NOT NULL DEFAULT now(),
-          snapshot_time_utc TIMESTAMPTZ NOT NULL DEFAULT now(),
-          features JSONB NOT NULL DEFAULT '{}'::jsonb,
-          created_at_utc TIMESTAMPTZ NOT NULL DEFAULT now()
+          merchant_id       TEXT NOT NULL,
+          snapshot_time_utc TIMESTAMPTZ NOT NULL,
+          computed_at_utc   TIMESTAMPTZ NOT NULL DEFAULT now(),
+          txn_count_15m     INTEGER NOT NULL DEFAULT 0,
+          gmv_usd_15m       NUMERIC(18,2) NOT NULL DEFAULT 0,
+          txn_count_1h      INTEGER NOT NULL DEFAULT 0,
+          gmv_usd_1h        NUMERIC(18,2) NOT NULL DEFAULT 0,
+          risk_score_v1     NUMERIC(5,2) NOT NULL DEFAULT 0,
+          risk_band_v1      TEXT NOT NULL DEFAULT 'low',
+          PRIMARY KEY (merchant_id, snapshot_time_utc)
         );
         """,
-        "ALTER TABLE mrp.merchant_feature_snapshots ADD COLUMN IF NOT EXISTS snapshot_time_utc TIMESTAMPTZ NOT NULL DEFAULT now();",
-        "CREATE INDEX IF NOT EXISTS idx_mfs_mid_snapshot_time ON mrp.merchant_feature_snapshots (merchant_id, snapshot_time_utc DESC);",
+        "ALTER TABLE mrp.merchant_feature_snapshots ADD COLUMN IF NOT EXISTS risk_score_v1 NUMERIC(5,2) NOT NULL DEFAULT 0;",
+        "ALTER TABLE mrp.merchant_feature_snapshots ADD COLUMN IF NOT EXISTS risk_band_v1 TEXT NOT NULL DEFAULT 'low';",
+        "CREATE INDEX IF NOT EXISTS idx_mfs_mid_computed_desc ON mrp.merchant_feature_snapshots (merchant_id, computed_at_utc DESC);",
+        "CREATE INDEX IF NOT EXISTS idx_mfs_snapshot_time_desc ON mrp.merchant_feature_snapshots (snapshot_time_utc DESC);",
     ]
 
     with db_conn() as conn:

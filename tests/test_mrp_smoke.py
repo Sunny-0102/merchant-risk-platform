@@ -26,6 +26,26 @@ def test_bootstrap_schema_contains_expected_snapshot_columns():
     assert "txn_count_24h" not in sql
     assert "gmv_usd_24h" not in sql
 
+
+def test_ingestion_api_snapshot_schema_matches_structured_bootstrap_shape():
+    py_path = _first_existing("services/ingestion_api/main.py")
+    txt = py_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert "CREATE TABLE IF NOT EXISTS mrp.merchant_feature_snapshots" in txt
+    for col in (
+        "txn_count_15m",
+        "gmv_usd_15m",
+        "txn_count_1h",
+        "gmv_usd_1h",
+        "risk_score_v1",
+        "risk_band_v1",
+        "computed_at_utc",
+    ):
+        assert re.search(rf"\b{re.escape(col)}\b", txt), f"Missing ingestion API snapshot column: {col}"
+
+    assert "features JSONB" not in txt
+    assert "feature_time_utc" not in txt
+
 def test_ci_scripts_do_not_reference_missing_24h_columns_or_invalid_docker_exec_T():
     # Pick whichever script location exists in this repo layout
     dedup = _first_existing("scripts/mrp_dedup.sh", "infra/local/scripts/mrp_dedup.sh")
