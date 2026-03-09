@@ -33,14 +33,17 @@ CREATE TABLE IF NOT EXISTS mrp.dim_merchant (
 
 -- 4) Fact table derived from raw events (minimal)
 CREATE TABLE IF NOT EXISTS mrp.fact_payment_events (
-  event_id        TEXT PRIMARY KEY,
-  event_type      TEXT,
-  event_time_utc TIMESTAMPTZ NOT NULL,
-  ingested_at_utc TIMESTAMPTZ NOT NULL,
-  merchant_id     TEXT NOT NULL,
-  order_id        TEXT,
-  amount_usd      NUMERIC(18,2),
-  status          TEXT,
+  event_id            TEXT PRIMARY KEY,
+  event_type          TEXT,
+  event_time_utc      TIMESTAMPTZ NOT NULL,
+  ingested_at_utc     TIMESTAMPTZ NOT NULL,
+  merchant_id         TEXT NOT NULL,
+  order_id            TEXT,
+  amount_usd          NUMERIC(18,2),
+  status              TEXT,
+  label_bad_outcome   INTEGER,
+  label_anomaly       INTEGER,
+  label_dispute_lost  INTEGER,
 
   -- lineage
   raw_id      BIGINT NOT NULL,
@@ -54,7 +57,10 @@ CREATE TABLE IF NOT EXISTS mrp.fact_payment_events (
 
 -- Upgrade-safe: if the table already existed (persistent docker volume), add event_time_utc.
 ALTER TABLE mrp.fact_payment_events
-  ADD COLUMN IF NOT EXISTS event_time_utc TIMESTAMPTZ;
+  ADD COLUMN IF NOT EXISTS event_time_utc TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS label_bad_outcome INTEGER,
+  ADD COLUMN IF NOT EXISTS label_anomaly INTEGER,
+  ADD COLUMN IF NOT EXISTS label_dispute_lost INTEGER;
 
 -- Backfill for old rows.
 UPDATE mrp.fact_payment_events
@@ -287,6 +293,90 @@ BEGIN
 
   RETURN COALESCE(v_rows, 0);
 END;
+$$;
+
+-- 8) Export labeled training dataset from feature snapshots + next-24h outcomes
+CREATE OR REPLACE FUNCTION mrp.export_risk_training_dataset(
+  p_snapshot_start_utc TIMESTAMPTZ,
+  p_snapshot_end_utc   TIMESTAMPTZ
+)
+RETURNS TABLE (
+  merchant_id              TEXT,
+  snapshot_time_utc        TIMESTAMPTZ,
+  computed_at_utc          TIMESTAMPTZ,
+  txn_count_15m            INTEGER,
+  gmv_usd_15m             NUMERIC(18,2),
+  txn_count_1h             INTEGER,
+  gmv_usd_1h               NUMERIC(18,2),
+  risk_score_v1            NUMERIC(5,2),
+  risk_band_v1             TEXT,
+  label_bad_outcome_24h    INTEGER,
+  label_anomaly_24h        INTEGER,
+  label_dispute_lost_24h   INTEGER
+)
+LANGUAGE sql
+AS $$
+  WITH snapshot_base AS (
+    SELECT
+      s.merchant_id,
+      s.snapshot_time_utc,
+      s.computed_at_utc,
+      s.txn_count_15m,
+      s.gmv_usd_15m,
+      s.txn_count_1h,
+      s.gmv_usd_1h,
+      s.risk_score_v1,
+      s.risk_band_v1
+    FROM mrp.merchant_feature_snapshots s
+    WHERE s.snapshot_time_utc >= p_snapshot_start_utc
+      AND s.snapshot_time_utc <  p_snapshot_end_utc
+      AND s.snapshot_time_utc + interval '24 hours' <= now()
+  ),
+  labeled AS (
+    SELECT
+      s.merchant_id,
+      s.snapshot_time_utc,
+      s.computed_at_utc,
+      s.txn_count_15m,
+      s.gmv_usd_15m,
+      s.txn_count_1h,
+      s.gmv_usd_1h,
+      s.risk_score_v1,
+      s.risk_band_v1,
+      COALESCE(MAX(COALESCE(f.label_bad_outcome, 0)), 0)::INTEGER  AS label_bad_outcome_24h,
+      COALESCE(MAX(COALESCE(f.label_anomaly, 0)), 0)::INTEGER      AS label_anomaly_24h,
+      COALESCE(MAX(COALESCE(f.label_dispute_lost, 0)), 0)::INTEGER AS label_dispute_lost_24h
+    FROM snapshot_base s
+    LEFT JOIN mrp.fact_payment_events f
+      ON f.merchant_id = s.merchant_id
+     AND f.event_time_utc >= s.snapshot_time_utc
+     AND f.event_time_utc <  s.snapshot_time_utc + interval '24 hours'
+    GROUP BY
+      s.merchant_id,
+      s.snapshot_time_utc,
+      s.computed_at_utc,
+      s.txn_count_15m,
+      s.gmv_usd_15m,
+      s.txn_count_1h,
+      s.gmv_usd_1h,
+      s.risk_score_v1,
+      s.risk_band_v1
+  )
+  SELECT
+    merchant_id,
+    snapshot_time_utc,
+    computed_at_utc,
+    txn_count_15m,
+    gmv_usd_15m,
+    txn_count_1h,
+    gmv_usd_1h,
+    risk_score_v1,
+    risk_band_v1,
+    label_bad_outcome_24h,
+    label_anomaly_24h,
+    label_dispute_lost_24h
+  FROM labeled
+  ORDER BY snapshot_time_utc, merchant_id;
 $$;
 
 -- 8) Seed a SYNTH_LIVE template row so mrp_e2e.sh can clone it on fresh DBs
