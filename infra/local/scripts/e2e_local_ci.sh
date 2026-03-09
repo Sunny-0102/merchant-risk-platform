@@ -43,7 +43,7 @@ ensure_bind_mount_dirs() {
   # So: create dirs, but do NOT hard-fail on permission twiddling.
   log_step "0) Ensure bind-mount directories exist on host"
   mkdir -p "${LOCAL_DIR}/airflow/dags" "${LOCAL_DIR}/airflow/logs" "${LOCAL_DIR}/airflow/plugins"
-  mkdir -p "${REPO_ROOT}/data/training_exports"
+  mkdir -p "${REPO_ROOT}/data/training_exports" || true
 
   # Helpful debug (never fail CI because of ls/stat weirdness)
   ls -ld "${LOCAL_DIR}/airflow" "${LOCAL_DIR}/airflow/dags" "${LOCAL_DIR}/airflow/logs" "${LOCAL_DIR}/airflow/plugins" || true
