@@ -1,5 +1,6 @@
 import csv
 from pathlib import Path
+import subprocess
 
 import pendulum
 
@@ -114,6 +115,15 @@ def export_training_dataset_csv(**context) -> str:
 
     return str(out_path)
 
+def train_local_risk_model(**context) -> str:
+    result = subprocess.run(
+        ["python", "/workspace/scripts/train_local_risk_model.py"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
 
 with DAG(
     dag_id="mrp_pipeline_dag",
@@ -181,4 +191,9 @@ with DAG(
         python_callable=export_training_dataset_csv,
     )
 
-    gate_new_data >> process_raw >> recompute_snapshot >> export_risk_training_dataset
+    train_local_risk_model = PythonOperator(
+        task_id="train_local_risk_model",
+        python_callable=train_local_risk_model,
+    )
+
+    gate_new_data >> process_raw >> recompute_snapshot >> export_risk_training_dataset >> train_local_risk_model
