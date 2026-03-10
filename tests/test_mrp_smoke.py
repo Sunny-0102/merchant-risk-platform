@@ -101,6 +101,30 @@ def test_local_risk_model_training_script_contract_exists():
     assert "data/models" in txt
     assert "risk_model_latest.pkl" in txt
 
+
+def test_airflow_dag_contains_local_model_training_task():
+    dag_path = _first_existing("infra/local/airflow/dags/mrp_pipeline_dag.py")
+    txt = dag_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert 'task_id="train_local_risk_model"' in txt
+    assert "scripts/train_local_risk_model.py" in txt
+
+
+def test_airflow_compose_mounts_local_training_scripts_directory():
+    compose_path = _first_existing("infra/local/docker-compose.airflow.yml")
+    txt = compose_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert "./../../scripts:/workspace/scripts" in txt
+
+
+def test_airflow_dag_gates_local_model_training_on_exported_rows():
+    dag_path = _first_existing("infra/local/airflow/dags/mrp_pipeline_dag.py")
+    txt = dag_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert 'task_id="gate_training_dataset_rows"' in txt
+    assert 'key="exported_rows"' in txt
+    assert "export_risk_training_dataset >> gate_training_dataset_rows >> train_local_risk_model" in txt
+
 def test_ci_scripts_do_not_reference_missing_24h_columns_or_invalid_docker_exec_T():
     # Pick whichever script location exists in this repo layout
     dedup = _first_existing("scripts/mrp_dedup.sh", "infra/local/scripts/mrp_dedup.sh")

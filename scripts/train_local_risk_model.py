@@ -6,8 +6,9 @@ import pickle
 from pathlib import Path
 from typing import Any
 
-TRAINING_DATASET_PATH = Path("data/training_exports/risk_training_dataset_latest.csv")
-MODEL_DIR = Path("data/models")
+REPO_ROOT = Path(__file__).resolve().parents[1]
+TRAINING_DATASET_PATH = REPO_ROOT / "data/training_exports/risk_training_dataset_latest.csv"
+MODEL_DIR = REPO_ROOT / "data/models"
 MODEL_PATH = MODEL_DIR / "risk_model_latest.pkl"
 
 TARGET_COLUMN = "label_bad_outcome_24h"
