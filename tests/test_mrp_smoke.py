@@ -125,6 +125,15 @@ def test_airflow_dag_gates_local_model_training_on_exported_rows():
     assert 'key="exported_rows"' in txt
     assert "export_risk_training_dataset >> gate_training_dataset_rows >> train_local_risk_model" in txt
 
+
+def test_local_risk_model_scoring_script_contract_exists():
+    script_path = _first_existing("scripts/score_local_risk_model.py")
+    txt = script_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert "data/models" in txt
+    assert "risk_model_latest.pkl" in txt
+    assert "risk_training_dataset_latest.csv" in txt
+
 def test_ci_scripts_do_not_reference_missing_24h_columns_or_invalid_docker_exec_T():
     # Pick whichever script location exists in this repo layout
     dedup = _first_existing("scripts/mrp_dedup.sh", "infra/local/scripts/mrp_dedup.sh")
