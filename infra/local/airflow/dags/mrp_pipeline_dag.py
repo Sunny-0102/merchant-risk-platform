@@ -113,7 +113,16 @@ def export_training_dataset_csv(**context) -> str:
         writer.writerow(fieldnames)
         writer.writerows(rows)
 
+    context["ti"].xcom_push(key="exported_rows", value=len(rows))
     return str(out_path)
+
+def has_exported_training_rows(**context) -> bool:
+    exported_rows = context["ti"].xcom_pull(
+        task_ids="export_risk_training_dataset",
+        key="exported_rows",
+    )
+    return int(exported_rows or 0) > 0
+
 
 def train_local_risk_model(**context) -> str:
     result = subprocess.run(
@@ -191,9 +200,14 @@ with DAG(
         python_callable=export_training_dataset_csv,
     )
 
+    gate_training_dataset_rows = ShortCircuitOperator(
+        task_id="gate_training_dataset_rows",
+        python_callable=has_exported_training_rows,
+    )
+
     train_local_risk_model = PythonOperator(
         task_id="train_local_risk_model",
         python_callable=train_local_risk_model,
     )
 
-    gate_new_data >> process_raw >> recompute_snapshot >> export_risk_training_dataset >> train_local_risk_model
+    gate_new_data >> process_raw >> recompute_snapshot >> export_risk_training_dataset >> gate_training_dataset_rows >> train_local_risk_model
