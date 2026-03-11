@@ -169,6 +169,17 @@ def test_local_model_score_persistence_is_gated_by_model_artifact():
     assert "LOCAL_MODEL_PATH.exists()" in txt
     assert "recompute_snapshot >> gate_local_model_artifact_exists >> persist_local_model_scores" in txt
 
+
+def test_latest_features_api_exposes_local_model_score_fields():
+    api_path = _first_existing("services/ingestion_api/main.py")
+    txt = api_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert '"/merchants/{merchant_id}/features/latest"' in txt
+    assert "local_model_score" in txt
+    assert "local_model_band" in txt
+    assert "local_model_version" in txt
+    assert "local_model_scored_at_utc" in txt
+
 def test_ci_scripts_do_not_reference_missing_24h_columns_or_invalid_docker_exec_T():
     # Pick whichever script location exists in this repo layout
     dedup = _first_existing("scripts/mrp_dedup.sh", "infra/local/scripts/mrp_dedup.sh")
