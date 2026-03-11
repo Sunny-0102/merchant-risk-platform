@@ -1,4 +1,5 @@
 import csv
+import importlib.util
 from pathlib import Path
 import subprocess
 
@@ -63,6 +64,8 @@ def has_new_raw(**context) -> bool:
 
 EXPORT_ROOT = Path("/workspace/data/training_exports")
 TRAINING_EXPORT_FILENAME = "risk_training_dataset_latest.csv"
+LOCAL_MODEL_PATH = Path("/workspace/data/models/risk_model_latest.pkl")
+LOCAL_SCORING_SCRIPT_PATH = Path("/workspace/scripts/score_local_risk_model.py")
 
 def export_training_dataset_csv(**context) -> str:
     hook = PostgresHook(postgres_conn_id="mrp_postgres")
@@ -122,6 +125,124 @@ def has_exported_training_rows(**context) -> bool:
         key="exported_rows",
     )
     return int(exported_rows or 0) > 0
+
+
+def has_local_model_artifact_exists(**context) -> bool:
+    return LOCAL_MODEL_PATH.exists()
+
+
+def load_local_scoring_module():
+    if not LOCAL_SCORING_SCRIPT_PATH.exists():
+        raise FileNotFoundError(f"Local scoring script not found: {LOCAL_SCORING_SCRIPT_PATH}")
+
+    spec = importlib.util.spec_from_file_location(
+        "score_local_risk_model",
+        LOCAL_SCORING_SCRIPT_PATH,
+    )
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Unable to load scoring module from: {LOCAL_SCORING_SCRIPT_PATH}")
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def persist_local_model_scores(**context) -> int:
+    if not LOCAL_MODEL_PATH.exists():
+        raise FileNotFoundError(f"Local model artifact not found: {LOCAL_MODEL_PATH}")
+
+    scoring_module = load_local_scoring_module()
+    model = scoring_module.load_model(LOCAL_MODEL_PATH)
+    hook = PostgresHook(postgres_conn_id="mrp_postgres")
+
+    interval_end_utc = (
+        context.get("data_interval_end")
+        or context.get("logical_date")
+        or pendulum.now("UTC")
+    )
+    score_window_end_utc = (
+        interval_end_utc.subtract(microseconds=1)
+        .start_of("minute")
+        .replace(minute=(interval_end_utc.subtract(microseconds=1).minute // 15) * 15, second=0, microsecond=0)
+        .add(minutes=15)
+    )
+    score_window_start_utc = score_window_end_utc.subtract(minutes=75)
+
+    rows = hook.get_records(
+        """
+        SELECT
+          merchant_id,
+          snapshot_time_utc,
+          txn_count_15m,
+          gmv_usd_15m,
+          txn_count_1h,
+          gmv_usd_1h,
+          risk_score_v1
+        FROM mrp.merchant_feature_snapshots
+        WHERE snapshot_time_utc BETWEEN %(score_window_start_utc)s::timestamptz
+                                    AND %(score_window_end_utc)s::timestamptz
+        ORDER BY snapshot_time_utc, merchant_id
+        """,
+        parameters={
+            "score_window_start_utc": score_window_start_utc.to_iso8601_string(),
+            "score_window_end_utc": score_window_end_utc.to_iso8601_string(),
+        },
+    )
+
+    if not rows:
+        return 0
+
+    scored_at_utc = pendulum.now("UTC").to_iso8601_string()
+    updates = []
+    for (
+        merchant_id,
+        snapshot_time_utc,
+        txn_count_15m,
+        gmv_usd_15m,
+        txn_count_1h,
+        gmv_usd_1h,
+        risk_score_v1,
+    ) in rows:
+        raw_row = {
+            "txn_count_15m": txn_count_15m,
+            "gmv_usd_15m": gmv_usd_15m,
+            "txn_count_1h": txn_count_1h,
+            "gmv_usd_1h": gmv_usd_1h,
+            "risk_score_v1": risk_score_v1,
+        }
+        score, band = scoring_module.score_row(model, raw_row)
+        updates.append(
+            (
+                round(score, 5),
+                band,
+                LOCAL_MODEL_PATH.name,
+                scored_at_utc,
+                merchant_id,
+                snapshot_time_utc,
+            )
+        )
+
+    conn = hook.get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.executemany(
+                """
+                UPDATE mrp.merchant_feature_snapshots
+                SET
+                  local_model_score = %s,
+                  local_model_band = %s,
+                  local_model_version = %s,
+                  local_model_scored_at_utc = %s::timestamptz
+                WHERE merchant_id = %s
+                  AND snapshot_time_utc = %s
+                """,
+                updates,
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return len(updates)
 
 
 def train_local_risk_model(**context) -> str:
@@ -210,4 +331,16 @@ with DAG(
         python_callable=train_local_risk_model,
     )
 
-    gate_new_data >> process_raw >> recompute_snapshot >> export_risk_training_dataset >> gate_training_dataset_rows >> train_local_risk_model
+    gate_local_model_artifact_exists = ShortCircuitOperator(
+        task_id="gate_local_model_artifact_exists",
+        python_callable=has_local_model_artifact_exists,
+    )
+
+    persist_local_model_scores = PythonOperator(
+        task_id="persist_local_model_scores",
+        python_callable=persist_local_model_scores,
+    )
+
+    gate_new_data >> process_raw >> recompute_snapshot
+    recompute_snapshot >> export_risk_training_dataset >> gate_training_dataset_rows >> train_local_risk_model
+    recompute_snapshot >> gate_local_model_artifact_exists >> persist_local_model_scores
