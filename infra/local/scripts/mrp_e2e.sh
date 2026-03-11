@@ -3,6 +3,12 @@ set -euo pipefail
 
 SRC="${SRC:-SYNTH_LIVE}"
 ENDPOINT_URL="${ENDPOINT_URL:-http://localhost:8080}"
+INGESTION_API_URL="${INGESTION_API_URL:-http://localhost:8000}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+TRAINING_EXPORT_PATH="${REPO_ROOT}/data/training_exports/risk_training_dataset_latest.csv"
+LOCAL_MODEL_PATH="${REPO_ROOT}/data/models/risk_model_latest.pkl"
 
 uniq8() {
   python3 - <<'PY'
@@ -69,6 +75,25 @@ EVT_ID="$(awk '{print $1}' <<<"$ins_out")"
 MID="$(awk '{print $2}' <<<"$ins_out")"
 
 echo "Inserted EVT_ID=$EVT_ID MID=$MID"
+echo
+
+echo "== 1.5) Build deterministic local model artifact =="
+mkdir -p "${REPO_ROOT}/data/training_exports" "${REPO_ROOT}/data/models"
+
+cat > "${TRAINING_EXPORT_PATH}" <<'CSV'
+merchant_id,snapshot_time_utc,computed_at_utc,txn_count_15m,gmv_usd_15m,txn_count_1h,gmv_usd_1h,risk_score_v1,risk_band_v1,label_bad_outcome_24h,label_anomaly_24h,label_dispute_lost_24h
+m_train_0001,2026-03-01T00:00:00Z,2026-03-01T00:05:00Z,2,40.00,4,90.00,15.00,low,0,0,0
+m_train_0002,2026-03-01T00:15:00Z,2026-03-01T00:20:00Z,9,600.00,18,1400.00,92.00,high,1,1,1
+CSV
+
+python3 "${REPO_ROOT}/scripts/train_local_risk_model.py"
+
+if [ ! -f "${LOCAL_MODEL_PATH}" ]; then
+  echo "ERROR: Local model artifact was not created at ${LOCAL_MODEL_PATH}"
+  exit 1
+fi
+
+echo "Model artifact ready: ${LOCAL_MODEL_PATH}"
 echo
 
 echo "== 2) Trigger manual DagRun =="
@@ -178,5 +203,44 @@ if [ "${FACT_CNT:-0}" -lt 1 ] || [ "${SNAP_CNT:-0}" -lt 1 ]; then
   exit 1
 fi
 
-echo "✅ E2E PASS: raw -> fact -> snapshot verified"
+echo
+echo "== 5) Validate latest features API exposes persisted local-model fields =="
+FEATURES_JSON="$(curl -sS -f "${INGESTION_API_URL}/merchants/${MID}/features/latest")"
+printf '%s
+' "$FEATURES_JSON"
+
+FEATURES_JSON="$FEATURES_JSON" python3 - "$MID" <<'PYJSON'
+import json
+import os
+import sys
+
+mid = sys.argv[1]
+doc = json.loads(os.environ["FEATURES_JSON"])
+
+if doc.get("merchant_id") != mid:
+    raise SystemExit(f"merchant_id mismatch: expected={mid} actual={doc.get('merchant_id')}")
+
+for key in (
+    "local_model_score",
+    "local_model_band",
+    "local_model_version",
+    "local_model_scored_at_utc",
+):
+    if key not in doc:
+        raise SystemExit(f"missing key: {key}")
+
+if doc.get("local_model_score") in (None, ""):
+    raise SystemExit("local_model_score missing value")
+
+if doc.get("local_model_band") not in {"low", "medium", "high"}:
+    raise SystemExit(f"unexpected local_model_band={doc.get('local_model_band')}")
+
+if doc.get("local_model_version") != "risk_model_latest.pkl":
+    raise SystemExit(f"unexpected local_model_version={doc.get('local_model_version')}")
+
+if doc.get("local_model_scored_at_utc") in (None, ""):
+    raise SystemExit("local_model_scored_at_utc missing value")
+PYJSON
+
+echo "✅ E2E PASS: raw -> fact -> snapshot -> local-model-score API verified"
 echo "RUN_ID=$RUN_ID EVT_ID=$EVT_ID MID=$MID"
