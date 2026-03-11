@@ -134,6 +134,41 @@ def test_local_risk_model_scoring_script_contract_exists():
     assert "risk_model_latest.pkl" in txt
     assert "risk_training_dataset_latest.csv" in txt
 
+
+def test_local_model_score_persistence_contract_exists():
+    dag_path = _first_existing("infra/local/airflow/dags/mrp_pipeline_dag.py")
+    txt = dag_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert "persist_local_model_scores" in txt
+    assert "risk_model_latest.pkl" in txt
+    assert "merchant_feature_snapshots" in txt
+
+
+def test_local_model_score_schema_columns_exist_in_bootstraps():
+    bootstrap_path = _first_existing("infra/local/postgres-init/02_mrp_bootstrap.sql")
+    api_path = _first_existing("services/ingestion_api/main.py")
+
+    bootstrap_txt = bootstrap_path.read_text(encoding="utf-8", errors="ignore")
+    api_txt = api_path.read_text(encoding="utf-8", errors="ignore")
+
+    for needle in (
+        "local_model_score",
+        "local_model_band",
+        "local_model_version",
+        "local_model_scored_at_utc",
+    ):
+        assert needle in bootstrap_txt
+        assert needle in api_txt
+
+
+def test_local_model_score_persistence_is_gated_by_model_artifact():
+    dag_path = _first_existing("infra/local/airflow/dags/mrp_pipeline_dag.py")
+    txt = dag_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert 'task_id="gate_local_model_artifact_exists"' in txt
+    assert "LOCAL_MODEL_PATH.exists()" in txt
+    assert "recompute_snapshot >> gate_local_model_artifact_exists >> persist_local_model_scores" in txt
+
 def test_ci_scripts_do_not_reference_missing_24h_columns_or_invalid_docker_exec_T():
     # Pick whichever script location exists in this repo layout
     dedup = _first_existing("scripts/mrp_dedup.sh", "infra/local/scripts/mrp_dedup.sh")
