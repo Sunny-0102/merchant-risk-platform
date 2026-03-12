@@ -191,6 +191,18 @@ def test_e2e_script_checks_local_model_score_fields_from_latest_features_api():
     assert "local_model_version" in txt
     assert "local_model_scored_at_utc" in txt
 
+
+def test_local_model_backtest_script_contract_exists():
+    script_path = _first_existing("scripts/backtest_local_model_vs_v1.py")
+    txt = script_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert "risk_model_latest.pkl" in txt
+    assert "risk_training_dataset_latest.csv" in txt
+    assert "precision" in txt
+    assert "recall" in txt
+    assert "accuracy" in txt
+    assert "confusion" in txt
+
 def test_ci_scripts_do_not_reference_missing_24h_columns_or_invalid_docker_exec_T():
     # Pick whichever script location exists in this repo layout
     dedup = _first_existing("scripts/mrp_dedup.sh", "infra/local/scripts/mrp_dedup.sh")
