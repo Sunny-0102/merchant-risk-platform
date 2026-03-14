@@ -19,6 +19,7 @@ GENERATED_DIR="${REPO_ROOT}/data/generated/historical_training_seed"
 FACT_CSV="${GENERATED_DIR}/fact_payment_events.csv"
 TRAINING_EXPORT_DIR="${REPO_ROOT}/data/training_exports"
 TRAINING_EXPORT_PATH="${TRAINING_EXPORT_DIR}/risk_training_dataset_latest.csv"
+LOCAL_MODEL_PATH="${REPO_ROOT}/data/models/risk_model_latest.pkl"
 
 compose() {
   (
@@ -233,6 +234,11 @@ if [ "$(wc -l < "${TRAINING_EXPORT_PATH}")" -le 1 ]; then
   exit 1
 fi
 
+echo
+echo "== 8) Train local model artifact from exported dataset =="
+"${REPO_ROOT}/.venv311/bin/python" "${REPO_ROOT}/scripts/train_local_risk_model.py"
+
+echo
 echo
 echo "✅ Historical training data seeded successfully"
 echo "fact_csv=${FACT_CSV}"
