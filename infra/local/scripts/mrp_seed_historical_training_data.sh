@@ -240,6 +240,12 @@ echo "== 8) Train local model artifact from exported dataset =="
 
 echo
 echo
+echo "== 9) Run local model backtest report =="
+echo "expected_backtest_metrics=precision recall accuracy confusion"
+"${REPO_ROOT}/.venv311/bin/python" "${REPO_ROOT}/scripts/backtest_local_model_vs_v1.py"
+
+echo
+echo
 echo "✅ Historical training data seeded successfully"
 echo "fact_csv=${FACT_CSV}"
 echo "training_export_path=${TRAINING_EXPORT_PATH}"
