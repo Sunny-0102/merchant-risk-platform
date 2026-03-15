@@ -241,6 +241,15 @@ def test_local_model_backtest_script_supports_time_split_evaluation():
     assert "test_rows" in txt
     assert "time_split" in txt
 
+
+def test_local_model_backtest_script_uses_strict_time_boundary_split():
+    script_path = _first_existing("scripts/backtest_local_model_vs_v1.py")
+    txt = script_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert "boundary_snapshot_time" in txt
+    assert "train_end_snapshot_time" in txt
+    assert "test_start_snapshot_time" in txt
+
 def test_ci_scripts_do_not_reference_missing_24h_columns_or_invalid_docker_exec_T():
     # Pick whichever script location exists in this repo layout
     dedup = _first_existing("scripts/mrp_dedup.sh", "infra/local/scripts/mrp_dedup.sh")
