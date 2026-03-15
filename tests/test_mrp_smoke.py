@@ -231,6 +231,16 @@ def test_historical_training_seed_script_auto_runs_backtest():
     assert "precision" in txt
     assert "accuracy" in txt
 
+
+def test_local_model_backtest_script_supports_time_split_evaluation():
+    script_path = _first_existing("scripts/backtest_local_model_vs_v1.py")
+    txt = script_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert "snapshot_time_utc" in txt
+    assert "train_rows" in txt
+    assert "test_rows" in txt
+    assert "time_split" in txt
+
 def test_ci_scripts_do_not_reference_missing_24h_columns_or_invalid_docker_exec_T():
     # Pick whichever script location exists in this repo layout
     dedup = _first_existing("scripts/mrp_dedup.sh", "infra/local/scripts/mrp_dedup.sh")
