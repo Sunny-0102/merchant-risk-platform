@@ -57,21 +57,35 @@ def load_module(module_name: str, script_path: Path):
     return module
 
 
-def split_rows_time_based(rows: list[dict[str, Any]], time_split: float) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def split_rows_time_based(
+    rows: list[dict[str, Any]], time_split: float
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], datetime]:
     if not 0.0 < time_split < 1.0:
         raise SystemExit(f"time_split must be between 0 and 1, got: {time_split}")
 
     ordered = sorted(rows, key=lambda row: parse_snapshot_time(row.get("snapshot_time_utc")))
-    split_idx = int(len(ordered) * time_split)
-    split_idx = max(1, min(split_idx, len(ordered) - 1))
+    unique_snapshot_times = sorted({parse_snapshot_time(row.get("snapshot_time_utc")) for row in ordered})
 
-    train_rows = ordered[:split_idx]
-    test_rows = ordered[split_idx:]
+    if len(unique_snapshot_times) < 2:
+        raise SystemExit("time-based split requires at least two distinct snapshot_time_utc values")
+
+    boundary_idx = int(len(unique_snapshot_times) * time_split)
+    boundary_idx = max(1, min(boundary_idx, len(unique_snapshot_times) - 1))
+    boundary_snapshot_time = unique_snapshot_times[boundary_idx]
+
+    train_rows = [
+        row for row in ordered
+        if parse_snapshot_time(row.get("snapshot_time_utc")) < boundary_snapshot_time
+    ]
+    test_rows = [
+        row for row in ordered
+        if parse_snapshot_time(row.get("snapshot_time_utc")) >= boundary_snapshot_time
+    ]
 
     if not train_rows or not test_rows:
-        raise SystemExit("time-based split produced an empty train or test partition")
+        raise SystemExit("strict time-boundary split produced an empty train or test partition")
 
-    return train_rows, test_rows
+    return train_rows, test_rows, boundary_snapshot_time
 
 
 def build_training_rows(raw_rows: list[dict[str, Any]], feature_columns: list[str]) -> list[dict[str, float]]:
@@ -155,7 +169,7 @@ def main() -> None:
     args = parser.parse_args()
 
     raw_rows = load_rows(args.input_csv)
-    train_rows_raw, test_rows_raw = split_rows_time_based(raw_rows, args.time_split)
+    train_rows_raw, test_rows_raw, boundary_snapshot_time = split_rows_time_based(raw_rows, args.time_split)
 
     scoring_module = load_module("score_local_risk_model", SCORING_SCRIPT_PATH)
     training_module = load_module("train_local_risk_model", TRAINING_SCRIPT_PATH)
@@ -187,6 +201,7 @@ def main() -> None:
     print(f"rows={len(raw_rows)}")
     print(f"train_rows={len(train_rows_raw)}")
     print(f"test_rows={len(test_rows_raw)}")
+    print(f"boundary_snapshot_time={boundary_snapshot_time.isoformat()}")
     print(f"train_end_snapshot_time={train_rows_raw[-1]['snapshot_time_utc']}")
     print(f"test_start_snapshot_time={test_rows_raw[0]['snapshot_time_utc']}")
     print(f"positive_rate={positive_rate(y_true):.6f}")
