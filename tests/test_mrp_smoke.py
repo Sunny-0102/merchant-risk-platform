@@ -250,6 +250,17 @@ def test_local_model_backtest_script_uses_strict_time_boundary_split():
     assert "train_end_snapshot_time" in txt
     assert "test_start_snapshot_time" in txt
 
+
+def test_sagemaker_training_scaffold_script_contract_exists():
+    script_path = _first_existing("scripts/launch_sagemaker_training_job.py")
+    txt = script_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert "boto3" in txt
+    assert "sagemaker" in txt.lower()
+    assert "create_training_job" in txt
+    assert "risk_training_dataset_latest.csv" in txt
+    assert "risk_model_latest.pkl" in txt
+
 def test_ci_scripts_do_not_reference_missing_24h_columns_or_invalid_docker_exec_T():
     # Pick whichever script location exists in this repo layout
     dedup = _first_existing("scripts/mrp_dedup.sh", "infra/local/scripts/mrp_dedup.sh")
